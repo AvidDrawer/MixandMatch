@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <vector>
+#include <list>
 #include <stb_image.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -41,7 +42,7 @@ float radius = 0.4f * multiplier;
 float yaw = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
 float pitch = 0.0f;
 std::vector<int> moveIndices;
-std::vector<int> gravityIndices;
+std::list<int> gravityIndices;
 std::vector<int> explosionIndices;
 
 void processInput(GLFWwindow* window);
@@ -678,15 +679,32 @@ int main()
         if (gravityIndices.size())
         {
             glm::vec3 disp = {0,-1,0};
-            for (int i = 0; i < gravityIndices.size(); ++i)
+
+            std::list<int>::iterator gravityIterator = gravityIndices.begin();
+            while (gravityIterator != gravityIndices.end())
             {
-                if(translations[gravityIndices[i]][1]>0)
+                if (*gravityIterator == objectIndex)
                 {
-                    translations[gravityIndices[i]] += disp * deltaTime;
-                    if (translations[gravityIndices[i]][1] < 0)
-                        translations[gravityIndices[i]][1] = 0;
-                    glBufferSubData(GL_ARRAY_BUFFER, gravityIndices[i] * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[gravityIndices[i]]));
+                    ++gravityIterator;
+                    continue;
                 }
+
+                translations[*gravityIterator] += disp * deltaTime;
+                bool remove = false;
+                if (translations[*gravityIterator][1] < 0)
+                {
+                    translations[*gravityIterator][1] = 0;
+                    remove = true;
+                }
+                glBufferSubData(GL_ARRAY_BUFFER, *gravityIterator * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[*gravityIterator]));
+
+                if (remove)
+                {
+                    explosionIndices.push_back(*gravityIterator);
+                    gravityIterator = gravityIndices.erase(gravityIterator);
+                }
+                else
+                    ++gravityIterator;
             }
         }
         glBindBuffer(GL_ARRAY_BUFFER, 0);
