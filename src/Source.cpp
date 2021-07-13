@@ -41,9 +41,9 @@ float radius = 0.4f * multiplier;
 
 float yaw = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
 float pitch = 0.0f;
-std::vector<int> moveIndices;
 std::list<int> gravityIndices;
 std::vector<int> explosionIndices;
+std::vector<short> movableObject(2500, 1);
 
 void processInput(GLFWwindow* window);
 void mouse_move_callback(GLFWwindow* window, double posx, double posy);
@@ -671,9 +671,10 @@ int main()
        
         
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-        for (int i = 0; i < moveIndices.size(); ++i)
+        
+        if(objectIndex != -1)
         {
-            glBufferSubData(GL_ARRAY_BUFFER, moveIndices[i] * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[moveIndices[i]]));
+            glBufferSubData(GL_ARRAY_BUFFER, objectIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[objectIndex]));
         }
         
         if (gravityIndices.size())
@@ -903,18 +904,21 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
                 objectIndex = minval.first;
                 mouseMoveMode = true;
                 firstMouse = true;
-                moveIndices.push_back(objectIndex);
             }
         }
         else if (action == GLFW_RELEASE)
         {
             objectMoveMode = false;
             mouseMoveMode = false;
-            if (moveIndices.size())
+            if (objectIndex != -1)
             {
-                gravityIndices.push_back(moveIndices[0]);
-                moveIndices.pop_back();
+                if (movableObject[objectIndex])
+                {
+                    gravityIndices.push_back(objectIndex);
+                    movableObject[objectIndex] = false;
+                }
             }
+            objectIndex = -1;
         }
     }
     else if (button == GLFW_MOUSE_BUTTON_RIGHT)
