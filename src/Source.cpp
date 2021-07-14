@@ -9,6 +9,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/intersect.hpp>
 #include <string>
+#include <algorithm>
 
 const int w_win = 800;
 const int h_win = 600;
@@ -35,15 +36,17 @@ bool objectMoveMode = false;
 bool collisionCheck = false;
 int objectIndex = 0;
 glm::vec3 mouseDir(0.0f,0.0f,0.0f);
-glm::vec3 translations[2501];
+std::vector<glm::vec3> translations(2500);
 float multiplier = 5;
 float radius = 0.4f * multiplier;
 
 float yaw = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
 float pitch = 0.0f;
 std::list<int> gravityIndices;
-std::vector<int> explosionIndices;
+std::list<int> explosionIndices;
 std::vector<short> movableObject(2500, 1);
+std::vector<glm::vec3> explosionPositions;
+std::vector<float> explosionStartTimes;
 
 void processInput(GLFWwindow* window);
 void mouse_move_callback(GLFWwindow* window, double posx, double posy);
@@ -102,19 +105,23 @@ const char* vertexExplodeShaderSource = "#version 460 core\n"
 "layout(location = 0) in vec3 aPos;\n"
 "layout(location = 1) in vec3 aNorm;\n"
 "layout(location = 2) in vec3 offset;\n"
+"layout(location = 3) in float fadeTime;\n"
 "uniform mat4 model;\n"
 "uniform mat4 view;\n"
 "uniform mat4 projection;\n"
+"uniform float currentTime\n;"
 "\n"
 "out VS_OUT{\n"
 "    vec3 normal;\n"
 "    vec3 posf;\n"
+"    float time;\n"
 "} vs_out;\n"
 "void main()\n"
 "{\n"
 "	gl_Position = projection * view * model * vec4(aPos+offset, 1.0f);\n"
 "   vs_out.posf = vec3(model * vec4(aPos+offset, 1.0f));\n"
 "   vs_out.normal = aNorm;\n"
+"   vs_out.time = currentTime - fadeTime;\n"
 "}\0";
 
 const char* fragmentExplodeShaderSource = "#version 460 core\n"
@@ -141,6 +148,7 @@ const char* geometryExplodeShaderSource = "#version 460 core\n"
 "in VS_OUT{\n"
 "    vec3 normal;\n"
 "    vec3 posf;\n"
+"    float time;\n"
 "} gs_in[];\n"
 
 "smooth out vec3 Posf;\n"
@@ -151,7 +159,7 @@ const char* geometryExplodeShaderSource = "#version 460 core\n"
 "   vec3 v2 = vec3(gl_in[2].gl_Position) - vec3(gl_in[1].gl_Position);\n"
 "   vec3 n = cross(v1, v2);\n"
 "   Normf = gs_in[0].normal;\n"
-"   float mag = 2.0;\n"
+"   float mag = gs_in[2].time;\n"
 "   vec3 pn = gs_in[0].posf + n*mag;\n"
 "   Posf = pn;\n"
 "   gl_Position = gl_in[0].gl_Position + vec4(n * mag,0.0f);\n"
@@ -464,16 +472,16 @@ int main()
         std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog3 << std::endl;
     }
 
-    unsigned int shaderProgram3;
-    shaderProgram3 = glCreateProgram();
-    glAttachShader(shaderProgram3, vertexShader3);
-    glAttachShader(shaderProgram3, fragmentShader3);
-    glAttachShader(shaderProgram3, geomShader3);
-    glLinkProgram(shaderProgram3);
-    glGetProgramiv(shaderProgram3, GL_LINK_STATUS, &success);
+    unsigned int explosionShader;
+    explosionShader = glCreateProgram();
+    glAttachShader(explosionShader, vertexShader3);
+    glAttachShader(explosionShader, fragmentShader3);
+    glAttachShader(explosionShader, geomShader3);
+    glLinkProgram(explosionShader);
+    glGetProgramiv(explosionShader, GL_LINK_STATUS, &success);
     if (!success) {
-        glGetProgramInfoLog(shaderProgram3, 512, NULL, infoLog3);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED:" << infoLog3 << ":"<<std::endl;
+        glGetProgramInfoLog(explosionShader, 512, NULL, infoLog3);
+        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED:" << infoLog3 << ":" << std::endl;
     }
     glDeleteShader(vertexShader3);
     glDeleteShader(fragmentShader3);
@@ -552,13 +560,14 @@ int main()
     int skyboxLoc2 = glGetUniformLocation(shaderProgram2, "skybox");
     glUniform1i(skyboxLoc2, 0);
 
-    glUseProgram(shaderProgram3);
-    int modelLocN = glGetUniformLocation(shaderProgram3, "model");
-    int viewLocN = glGetUniformLocation(shaderProgram3, "view");
-    int projLocN = glGetUniformLocation(shaderProgram3, "projection");
-    int camposN = glGetUniformLocation(shaderProgram3, "cameraPos");
-    int skyboxLoc3 = glGetUniformLocation(shaderProgram3, "skybox");
+    glUseProgram(explosionShader);
+    int modelLocN = glGetUniformLocation(explosionShader, "model");
+    int viewLocN = glGetUniformLocation(explosionShader, "view");
+    int projLocN = glGetUniformLocation(explosionShader, "projection");
+    int camposN = glGetUniformLocation(explosionShader, "cameraPos");
+    int skyboxLoc3 = glGetUniformLocation(explosionShader, "skybox");
     glUniform1i(skyboxLoc3, 0);
+    int currentTimepos = glGetUniformLocation(explosionShader, "currentTime");
 
     std::cout << "\n\n" << modelLocN << ":"<<viewLocN << ":" << projLocN << ":"<< camposN<<"\n";
     unsigned int VAO, VBO, EBO;
@@ -605,6 +614,38 @@ int main()
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glVertexAttribDivisor(2, 1);
+
+
+    unsigned int VAO2;
+    glGenVertexArrays(1, &VAO2);
+
+    glBindVertexArray(VAO2);
+
+    explosionPositions = translations;
+    explosionStartTimes = std::vector<float>(translations.size(), 0.0f);
+    unsigned int instanceVBO2, explosionTimeVBO;
+    glGenBuffers(1, &instanceVBO2);
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO2);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * explosionPositions.size(), &explosionPositions[0], GL_DYNAMIC_DRAW);
+
+    glGenBuffers(1, &explosionTimeVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * explosionStartTimes.size(), &explosionStartTimes[0], GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)(3 * sizeof(GL_FLOAT)));
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO2);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+    glVertexAttribDivisor(2, 1);
+    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT), (void*)0);
+    glVertexAttribDivisor(3, 1);
 
     glUseProgram(shaderProgram);
     glEnable(GL_DEPTH_TEST);
@@ -677,6 +718,7 @@ int main()
             glBufferSubData(GL_ARRAY_BUFFER, objectIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[objectIndex]));
         }
         
+        bool explosionAdded = false;
         if (gravityIndices.size())
         {
             glm::vec3 disp = {0,-1,0};
@@ -702,11 +744,49 @@ int main()
                 if (remove)
                 {
                     explosionIndices.push_back(*gravityIterator);
+                    explosionPositions[explosionIndices.size() - 1] = translations[*gravityIterator];
+                    explosionStartTimes[explosionIndices.size() - 1] = currentFrame;
                     gravityIterator = gravityIndices.erase(gravityIterator);
+                    explosionAdded = true;
                 }
                 else
                     ++gravityIterator;
             }
+        }
+
+        int numRemoved = 0;
+        for (int i = 0; i < explosionIndices.size(); ++i)
+        {
+            if (currentFrame - explosionStartTimes[i] > 8.0f)
+            {
+                // remove from here
+                ++numRemoved;
+            }
+            else
+            {
+                // nothing to update since geometry shader will do this
+
+                break;  // "start time sorted"
+            }
+        }
+
+        if (numRemoved || explosionAdded)
+        {
+            if (explosionIndices.size() - numRemoved)
+            {
+                if (numRemoved)
+                {
+                    std::copy(explosionStartTimes.begin(), explosionStartTimes.begin() + numRemoved, explosionStartTimes.begin() + numRemoved);
+                    std::copy(explosionPositions.begin(), explosionPositions.begin() + numRemoved, explosionPositions.begin() + numRemoved);
+                }
+                glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, (explosionIndices.size() - numRemoved) * sizeof(GL_FLOAT), &explosionStartTimes[0]);
+                glBindBuffer(GL_ARRAY_BUFFER, instanceVBO2);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, (explosionIndices.size() - numRemoved) * sizeof(glm::vec3), glm::value_ptr(explosionPositions[0]));
+            }
+
+            while (numRemoved--)
+                explosionIndices.pop_front();
         }
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         
@@ -721,14 +801,17 @@ int main()
         
 #endif
 
-        /*glUseProgram(shaderProgram3);
-        glBindVertexArray(VAO);
-        glUniformMatrix4fv(modelLocN, 1, GL_FALSE, glm::value_ptr(model));
-        glUniformMatrix4fv(viewLocN, 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(projLocN, 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(camposN, 1, glm::value_ptr(pos)); 
-        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, 2500);*/
-
+        if (explosionIndices.size())
+        {
+            glUseProgram(explosionShader);
+            glBindVertexArray(VAO2);
+            glUniformMatrix4fv(modelLocN, 1, GL_FALSE, glm::value_ptr(model));
+            glUniformMatrix4fv(viewLocN, 1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(projLocN, 1, GL_FALSE, glm::value_ptr(projection));
+            glUniform3fv(camposN, 1, glm::value_ptr(pos));
+            glUniform1f(currentTimepos, currentFrame);
+            glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, explosionIndices.size());
+        }
 
         //glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glDepthFunc(GL_LEQUAL);
