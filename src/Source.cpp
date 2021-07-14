@@ -37,6 +37,7 @@ bool collisionCheck = false;
 int objectIndex = 0;
 glm::vec3 mouseDir(0.0f,0.0f,0.0f);
 std::vector<glm::vec3> translations(2500);
+std::vector<int> discardIndices(2500,1);
 float multiplier = 5;
 float radius = 0.4f * multiplier;
 
@@ -64,18 +65,21 @@ const char* vertexShaderSource = "#version 460 core\n"
 "layout(location = 0) in vec3 aPos;\n"
 "layout(location = 1) in vec3 aNorm;\n"
 "layout(location = 2) in vec3 offset;\n"
+"layout(location = 3) in int render;\n"
 "uniform mat4 model;\n"
 "uniform mat4 view;\n"
 "uniform mat4 projection;\n"
 "\n"
 "out vec3 Posf;\n"
 "out vec3 Normf;\n"
+"out vec3 discardcheck;\n"
 "\n"
 "void main()\n"
 "{\n"
-"   Normf =     normalize(mat3(transpose(inverse(model))) * aNorm);\n"
-"   Posf = vec3(model * vec4(aPos+offset, 1.0f));\n"
-"	gl_Position = projection * view * model * vec4(aPos+offset, 1.0f);\n"
+"    Normf = normalize(mat3(transpose(inverse(model))) * aNorm);\n"
+"    Posf = vec3(model * vec4(aPos+offset, 1.0f));\n"
+"    gl_Position = projection * view * model * vec4(aPos+offset, 1.0f);\n"
+"    discardcheck[0] = render;\n"
 "}\0";
 
 const char* fragmentShaderSource = "#version 460 core\n"
@@ -84,12 +88,15 @@ const char* fragmentShaderSource = "#version 460 core\n"
 "\n"
 "in vec3 Posf;\n"
 "in vec3 Normf;\n"
+"in vec3 discardcheck;\n"
 "\n"
 "uniform samplerCube skybox;\n"
 "uniform vec3 cameraPos;\n"
 "\n"
 "void main()\n"
 "{\n"
+"   if(discardcheck[0]==0)\n"
+"       discard;\n"
 "   if(linemode == 1)\n"
 "       FragCol = vec4(0.0f,0.0f,0.0f,1.0f);\n"
 "   else\n"
@@ -603,17 +610,20 @@ int main()
         }
     }
 
-    unsigned int instanceVBO;
+    unsigned int instanceVBO, rendercheckVBO;
     glGenBuffers(1, &instanceVBO);
     glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 2500, &translations[0], GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
     glEnableVertexAttribArray(2);
-    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
     glVertexAttribDivisor(2, 1);
+
+    glGenBuffers(1, &rendercheckVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, rendercheckVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(int) * 2500, &discardIndices[0], GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_INT), (void*)0);
+    glVertexAttribDivisor(3, 1);
 
 
     unsigned int VAO2;
@@ -688,11 +698,10 @@ int main()
         if (currentFrame - startTime >= 1.0f)
         {
             //std::cout << "\nAverage render time: " << (1000.0f/numFrames) << " ms";
-            std::cout << "\nFrames per second: " << numFrames;
+            //std::cout << "\nFrames per second: " << numFrames;
             numFrames = 0;
             startTime = currentFrame;
         }
-
         view = glm::lookAt(pos, pos + front, up);
         projection = glm::perspective(glm::radians(fov), w_win * 1.0f / h_win, 0.1f, 2000.0f);
         
@@ -721,7 +730,7 @@ int main()
         bool explosionAdded = false;
         if (gravityIndices.size())
         {
-            glm::vec3 disp = {0,-1,0};
+            glm::vec3 disp = {0,-10,0};
 
             std::list<int>::iterator gravityIterator = gravityIndices.begin();
             while (gravityIterator != gravityIndices.end())
@@ -739,6 +748,7 @@ int main()
                     translations[*gravityIterator][1] = 0;
                     remove = true;
                 }
+                glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
                 glBufferSubData(GL_ARRAY_BUFFER, *gravityIterator * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[*gravityIterator]));
 
                 if (remove)
@@ -746,6 +756,11 @@ int main()
                     explosionIndices.push_back(*gravityIterator);
                     explosionPositions[explosionIndices.size() - 1] = translations[*gravityIterator];
                     explosionStartTimes[explosionIndices.size() - 1] = currentFrame;
+                    
+                    discardIndices[*gravityIterator] = 0;
+                    glBindBuffer(GL_ARRAY_BUFFER, rendercheckVBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, *gravityIterator * sizeof(int), sizeof(int), &discardIndices[*gravityIterator]);
+
                     gravityIterator = gravityIndices.erase(gravityIterator);
                     explosionAdded = true;
                 }
@@ -766,18 +781,17 @@ int main()
             {
                 // nothing to update since geometry shader will do this
 
-                break;  // "start time sorted"
+                //break;  // "start time sorted"
             }
         }
-
         if (numRemoved || explosionAdded)
         {
             if (explosionIndices.size() - numRemoved)
             {
                 if (numRemoved)
                 {
-                    std::copy(explosionStartTimes.begin(), explosionStartTimes.begin() + numRemoved, explosionStartTimes.begin() + numRemoved);
-                    std::copy(explosionPositions.begin(), explosionPositions.begin() + numRemoved, explosionPositions.begin() + numRemoved);
+                    std::copy(explosionStartTimes.begin() + numRemoved, explosionStartTimes.begin() + explosionIndices.size(), explosionStartTimes.begin());
+                    std::copy(explosionPositions.begin() + numRemoved, explosionPositions.begin() + explosionIndices.size(), explosionPositions.begin());
                 }
                 glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, (explosionIndices.size() - numRemoved) * sizeof(GL_FLOAT), &explosionStartTimes[0]);
@@ -785,8 +799,11 @@ int main()
                 glBufferSubData(GL_ARRAY_BUFFER, 0, (explosionIndices.size() - numRemoved) * sizeof(glm::vec3), glm::value_ptr(explosionPositions[0]));
             }
 
-            while (numRemoved--)
-                explosionIndices.pop_front();
+            if(numRemoved > 0)
+                while (numRemoved--)
+                {
+                    explosionIndices.pop_front();
+                }
         }
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         
@@ -959,6 +976,8 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             bool chk = false;
             for (int i = 0; i < 2500; ++i)
             {
+                if (!discardIndices[i])
+                    continue;
                 glm::vec3 diff = pos - translations[i];
 
                 float b = glm::dot(mouseDir, diff);
