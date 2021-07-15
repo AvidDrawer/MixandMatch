@@ -35,6 +35,7 @@ bool mouseMoveMode = false;
 bool objectMoveMode = false;
 bool collisionCheck = false;
 int objectIndex = 0;
+float explodeTime = 4.0f;
 glm::vec3 mouseDir(0.0f,0.0f,0.0f);
 std::vector<glm::vec3> translations(2500);
 std::vector<int> discardIndices(2500,1);
@@ -127,16 +128,15 @@ const char* vertexExplodeShaderSource = "#version 460 core\n"
 "{\n"
 "	gl_Position = projection * view * model * vec4(aPos+offset, 1.0f);\n"
 "   vs_out.posf = vec3(model * vec4(aPos+offset, 1.0f));\n"
-"   vs_out.normal = aNorm;\n"
+"   vs_out.normal = normalize(mat3(transpose(inverse(model))) * aNorm);\n"
 "   vs_out.time = currentTime - fadeTime;\n"
 "}\0";
 
 const char* fragmentExplodeShaderSource = "#version 460 core\n"
 "out vec4 FragCol;\n"
-"uniform int linemode;\n"
 "\n"
-"smooth in vec3 Posf;\n"
-"smooth in vec3 Normf;\n"
+"in vec3 Posf;\n"
+"in vec3 Normf;\n"
 "\n"
 "uniform samplerCube skybox;\n"
 "uniform vec3 cameraPos;\n"
@@ -158,23 +158,39 @@ const char* geometryExplodeShaderSource = "#version 460 core\n"
 "    float time;\n"
 "} gs_in[];\n"
 
-"smooth out vec3 Posf;\n"
-"smooth out vec3 Normf;\n"
+"uniform float lifetime;\n"
+"out vec3 Posf;\n"
+"out vec3 Normf;\n"
 "void main()\n"
 "{\n"
 "   vec3 v1 = vec3(gl_in[0].gl_Position) - vec3(gl_in[1].gl_Position);\n"
 "   vec3 v2 = vec3(gl_in[2].gl_Position) - vec3(gl_in[1].gl_Position);\n"
 "   vec3 n = cross(v1, v2);\n"
-"   Normf = gs_in[0].normal;\n"
 "   float mag = gs_in[2].time;\n"
-"   vec3 pn = gs_in[0].posf + n*mag;\n"
-"   Posf = pn;\n"
-"   gl_Position = gl_in[0].gl_Position + vec4(n * mag,0.0f);\n"
+
+"   vec4 midpt, movedpos[3];\n"
+"   movedpos[0] = gl_in[0].gl_Position + vec4(n * mag, 0.0f);\n"
+"   movedpos[1] = gl_in[1].gl_Position + vec4(n * mag, 0.0f);\n"
+"   movedpos[2] = gl_in[2].gl_Position + vec4(n * mag, 0.0f);\n"
+"   midpt = (movedpos[0] + movedpos[1] + movedpos[2]) / 3;\n"
+"   float f1 = gs_in[0].time / lifetime;\n"
+"   float f2 = 1 - f1;\n"
+
+"   gl_Position = f1 * midpt + f2 * movedpos[0];\n"
+"   Posf = gs_in[0].posf + vec3(n * mag);\n"
+"   Normf = gs_in[0].normal;\n"
 "   EmitVertex();\n"
-"   gl_Position = gl_in[1].gl_Position + vec4(n * mag,0.0f);\n"
+
+"   gl_Position = f1 * midpt + f2 * movedpos[1];\n"
+"   Posf = gs_in[1].posf + vec3(n * mag);\n"
+"   Normf = gs_in[1].normal;\n"
 "   EmitVertex();\n"
-"   gl_Position = gl_in[2].gl_Position + vec4(n * mag,0.0f);\n"
+
+"   gl_Position = f1 * midpt + f2 * movedpos[2];\n"
+"   Posf = gs_in[2].posf + vec3(n * mag);\n"
+"   Normf = gs_in[2].normal;\n"
 "   EmitVertex();\n"
+"   EndPrimitive();\n"
 "}\0";
 
 const char* normalvertexShaderSource = "#version 460 core\n"
@@ -573,7 +589,9 @@ int main()
     int projLocN = glGetUniformLocation(explosionShader, "projection");
     int camposN = glGetUniformLocation(explosionShader, "cameraPos");
     int skyboxLoc3 = glGetUniformLocation(explosionShader, "skybox");
+    int explodeTimeLoc = glGetUniformLocation(explosionShader, "lifetime");
     glUniform1i(skyboxLoc3, 0);
+    glUniform1f(explodeTimeLoc, explodeTime);
     int currentTimepos = glGetUniformLocation(explosionShader, "currentTime");
 
     std::cout << "\n\n" << modelLocN << ":"<<viewLocN << ":" << projLocN << ":"<< camposN<<"\n";
@@ -697,8 +715,8 @@ int main()
         ++numFrames;
         if (currentFrame - startTime >= 1.0f)
         {
-            //std::cout << "\nAverage render time: " << (1000.0f/numFrames) << " ms";
-            //std::cout << "\nFrames per second: " << numFrames;
+            std::cout << "\nAverage render time: " << (1000.0f/numFrames) << " ms";
+            std::cout << "\t\tFrames per second: " << numFrames;
             numFrames = 0;
             startTime = currentFrame;
         }
@@ -772,7 +790,7 @@ int main()
         int numRemoved = 0;
         for (int i = 0; i < explosionIndices.size(); ++i)
         {
-            if (currentFrame - explosionStartTimes[i] > 8.0f)
+            if (currentFrame - explosionStartTimes[i] > explodeTime)
             {
                 // remove from here
                 ++numRemoved;
@@ -820,6 +838,7 @@ int main()
 
         if (explosionIndices.size())
         {
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
             glUseProgram(explosionShader);
             glBindVertexArray(VAO2);
             glUniformMatrix4fv(modelLocN, 1, GL_FALSE, glm::value_ptr(model));
