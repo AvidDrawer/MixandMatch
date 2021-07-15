@@ -1,6 +1,8 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <shader-source-code.h>
+#include <Shader.h>
 #include <vector>
 #include <list>
 #include <stb_image.h>
@@ -61,207 +63,6 @@ void window_size_callback(GLFWwindow* window, int width, int height)
 }
 
 unsigned int loadCubemap(std::vector<std::string> faces);
-
-const char* vertexShaderSource = "#version 460 core\n"
-"layout(location = 0) in vec3 aPos;\n"
-"layout(location = 1) in vec3 aNorm;\n"
-"layout(location = 2) in vec3 offset;\n"
-"layout(location = 3) in int render;\n"
-"uniform mat4 model;\n"
-"uniform mat4 view;\n"
-"uniform mat4 projection;\n"
-"\n"
-"out vec3 Posf;\n"
-"out vec3 Normf;\n"
-"out vec3 discardcheck;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    Normf = normalize(mat3(transpose(inverse(model))) * aNorm);\n"
-"    Posf = vec3(model * vec4(aPos+offset, 1.0f));\n"
-"    gl_Position = projection * view * model * vec4(aPos+offset, 1.0f);\n"
-"    discardcheck[0] = render;\n"
-"}\0";
-
-const char* fragmentShaderSource = "#version 460 core\n"
-"out vec4 FragCol;\n"
-"uniform int linemode;\n"
-"\n"
-"in vec3 Posf;\n"
-"in vec3 Normf;\n"
-"in vec3 discardcheck;\n"
-"\n"
-"uniform samplerCube skybox;\n"
-"uniform vec3 cameraPos;\n"
-"\n"
-"void main()\n"
-"{\n"
-"   if(discardcheck[0]==0)\n"
-"       discard;\n"
-"   if(linemode == 1)\n"
-"       FragCol = vec4(0.0f,0.0f,0.0f,1.0f);\n"
-"   else\n"
-"   {\n"
-"       vec3 I = normalize(Posf - cameraPos);\n"
-"       vec3 refDir = reflect(I, Normf);\n"
-"	    FragCol = vec4(texture(skybox, refDir).rgb,1.0f);\n"
-"   }\n"
-"}\0";
-
-
-const char* vertexExplodeShaderSource = "#version 460 core\n"
-"layout(location = 0) in vec3 aPos;\n"
-"layout(location = 1) in vec3 aNorm;\n"
-"layout(location = 2) in vec3 offset;\n"
-"layout(location = 3) in float fadeTime;\n"
-"uniform mat4 model;\n"
-"uniform mat4 view;\n"
-"uniform mat4 projection;\n"
-"uniform float currentTime\n;"
-"\n"
-"out VS_OUT{\n"
-"    vec3 normal;\n"
-"    vec3 posf;\n"
-"    float time;\n"
-"} vs_out;\n"
-"void main()\n"
-"{\n"
-"	gl_Position = projection * view * model * vec4(aPos+offset, 1.0f);\n"
-"   vs_out.posf = vec3(model * vec4(aPos+offset, 1.0f));\n"
-"   vs_out.normal = normalize(mat3(transpose(inverse(model))) * aNorm);\n"
-"   vs_out.time = currentTime - fadeTime;\n"
-"}\0";
-
-const char* fragmentExplodeShaderSource = "#version 460 core\n"
-"out vec4 FragCol;\n"
-"\n"
-"in vec3 Posf;\n"
-"in vec3 Normf;\n"
-"\n"
-"uniform samplerCube skybox;\n"
-"uniform vec3 cameraPos;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    vec3 I = normalize(Posf - cameraPos);\n"
-"    vec3 refDir = reflect(I, Normf);\n"
-"    FragCol = vec4(texture(skybox, refDir).rgb,1.0f);\n"
-"}\0";
-
-const char* geometryExplodeShaderSource = "#version 460 core\n"
-"layout(triangles) in;\n"
-"layout(triangle_strip, max_vertices = 3) out;\n"
-
-"in VS_OUT{\n"
-"    vec3 normal;\n"
-"    vec3 posf;\n"
-"    float time;\n"
-"} gs_in[];\n"
-
-"uniform float lifetime;\n"
-"out vec3 Posf;\n"
-"out vec3 Normf;\n"
-"void main()\n"
-"{\n"
-"   vec3 v1 = vec3(gl_in[0].gl_Position) - vec3(gl_in[1].gl_Position);\n"
-"   vec3 v2 = vec3(gl_in[2].gl_Position) - vec3(gl_in[1].gl_Position);\n"
-"   vec3 n = cross(v1, v2);\n"
-"   float mag = gs_in[2].time;\n"
-
-"   vec4 midpt, movedpos[3];\n"
-"   movedpos[0] = gl_in[0].gl_Position + vec4(n * mag, 0.0f);\n"
-"   movedpos[1] = gl_in[1].gl_Position + vec4(n * mag, 0.0f);\n"
-"   movedpos[2] = gl_in[2].gl_Position + vec4(n * mag, 0.0f);\n"
-"   midpt = (movedpos[0] + movedpos[1] + movedpos[2]) / 3;\n"
-"   float f1 = gs_in[0].time / lifetime;\n"
-"   float f2 = 1 - f1;\n"
-
-"   gl_Position = f1 * midpt + f2 * movedpos[0];\n"
-"   Posf = gs_in[0].posf + vec3(n * mag);\n"
-"   Normf = gs_in[0].normal;\n"
-"   EmitVertex();\n"
-
-"   gl_Position = f1 * midpt + f2 * movedpos[1];\n"
-"   Posf = gs_in[1].posf + vec3(n * mag);\n"
-"   Normf = gs_in[1].normal;\n"
-"   EmitVertex();\n"
-
-"   gl_Position = f1 * midpt + f2 * movedpos[2];\n"
-"   Posf = gs_in[2].posf + vec3(n * mag);\n"
-"   Normf = gs_in[2].normal;\n"
-"   EmitVertex();\n"
-"   EndPrimitive();\n"
-"}\0";
-
-const char* normalvertexShaderSource = "#version 460 core\n"
-"layout(location = 0) in vec3 aPos;\n"
-"layout(location = 1) in vec3 aNorm;\n"
-"layout(location = 2) in vec3 offset;\n"
-"uniform mat4 model;\n"
-"uniform mat4 view;\n"
-"\n"
-"out VS_OUT {\n"
-" vec3 normal;"
-"}vs_out;\n"
-"\n"
-"void main()\n"
-"{\n"
-"   vs_out.normal = normalize(mat3(transpose(inverse(view * model))) * aNorm);\n"
-"	gl_Position = view * model * vec4(aPos+offset, 1.0f);\n"
-"}\0";
-
-const char* normalgeometryShaderSource = "#version 460 core\n"
-"layout (triangles) in; "
-"layout (line_strip, max_vertices = 6) out;"
-"in VS_OUT {\n"
-" vec3 normal;"
-"}vs_in[];\n"
-"uniform mat4 projection;\n"
-"\n"
-"void GenerateLine(int index)\n"
-"{\n"
-"    gl_Position = projection * gl_in[index].gl_Position;\n"
-"    EmitVertex();\n"
-"    gl_Position = projection * (gl_in[index].gl_Position + vec4(vs_in[index].normal, 0.0)*10);\n"
-"    EmitVertex();\n"
-"    EndPrimitive();\n"
-"}\n"
-"void main()\n"
-"{\n"
-"    GenerateLine(0); // first vertex normal\n"
-"    GenerateLine(1); // second vertex normal\n"
-"    GenerateLine(2); // third vertex normal\n"
-"}\0";
-
-const char* normalfragmentShaderSource = "#version 460 core\n"
-"out vec4 FragCol;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    FragCol = vec4(1.0f,1.0f,0.0f,1.0f);\n"
-"}\0";
-
-const char* vsCubemap = "#version 460 core\n"
-"layout (location = 0) in vec3 pos;\n"
-"uniform mat4 view;\n"
-"uniform mat4 projection;\n"
-"out vec3 texCoords;\n"
-"void main()"
-"{\n"
-"   texCoords = pos;\n"
-"   vec4 p = projection * view * vec4(pos,1.0f);\n"
-"   gl_Position = p.xyww;\n"
-"}\0";
-
-const char* fsCubemap = "#version 460 core\n"
-"out vec4 FragCol;\n"
-"in vec3 texCoords;\n"
-"uniform samplerCube skybox;"
-"void main()"
-"{\n"
-"	    FragCol = texture(skybox, texCoords);\n"
-"}\0";
-
 
 int main()
 {   
@@ -388,128 +189,11 @@ int main()
     }
 
     
-    // Shader compilation
-    // To render x spheres
-    unsigned int vertexShader, fragmentShader;
-    vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
-
-    fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
-
-    unsigned int shaderProgram;
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
-    }
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    // Cube map rendering
-    unsigned int vertexShader2, fragmentShader2;
-    vertexShader2 = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader2, 1, &vsCubemap, NULL);
-    glCompileShader(vertexShader2);
-    char infoLog2[512];
-    glGetShaderiv(vertexShader2, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(vertexShader2, 512, NULL, infoLog2);
-        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog2 << std::endl;
-    }
-
-    fragmentShader2 = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader2, 1, &fsCubemap, NULL);
-    glCompileShader(fragmentShader2);
-    glGetShaderiv(fragmentShader2, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(fragmentShader2, 512, NULL, infoLog2);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog2 << std::endl;
-    }
-
-    unsigned int shaderProgram2;
-    shaderProgram2 = glCreateProgram();
-    glAttachShader(shaderProgram2, vertexShader2);
-    glAttachShader(shaderProgram2, fragmentShader2);
-    glLinkProgram(shaderProgram2);
-    glGetProgramiv(shaderProgram2, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shaderProgram2, 512, NULL, infoLog2);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog2 << std::endl;
-    }
-    glDeleteShader(vertexShader2);
-    glDeleteShader(fragmentShader2);
-
-    // Explosion renderer 
-    unsigned int vertexShader3, fragmentShader3, geomShader3;
-    vertexShader3 = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader3, 1, &vertexExplodeShaderSource, NULL);
-    glCompileShader(vertexShader3);
-    char infoLog3[512];
-    glGetShaderiv(vertexShader3, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(vertexShader3, 512, NULL, infoLog3);
-        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog3 << std::endl;
-    }
-
-    geomShader3 = glCreateShader(GL_GEOMETRY_SHADER);
-    glShaderSource(geomShader3, 1, &geometryExplodeShaderSource, NULL);
-    glCompileShader(geomShader3);
-    glGetShaderiv(geomShader3, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(geomShader3, 512, NULL, infoLog3);
-        std::cout << "ERROR::SHADER::GEOMETRY::COMPILATION_FAILED\n" << infoLog3 << std::endl;
-    }
-
-    fragmentShader3 = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader3, 1, &fragmentExplodeShaderSource, NULL);
-    glCompileShader(fragmentShader3);
-    glGetShaderiv(fragmentShader3, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(fragmentShader3, 512, NULL, infoLog3);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog3 << std::endl;
-    }
-
-    unsigned int explosionShader;
-    explosionShader = glCreateProgram();
-    glAttachShader(explosionShader, vertexShader3);
-    glAttachShader(explosionShader, fragmentShader3);
-    glAttachShader(explosionShader, geomShader3);
-    glLinkProgram(explosionShader);
-    glGetProgramiv(explosionShader, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(explosionShader, 512, NULL, infoLog3);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED:" << infoLog3 << ":" << std::endl;
-    }
-    glDeleteShader(vertexShader3);
-    glDeleteShader(fragmentShader3);
-    glDeleteShader(geomShader3);
-
+    // Shaders 
+    Shader shapeRenderer(primaryshader::vs, primaryshader::fs);   // to render objects
+    Shader environRenderer(cubemapshader::vs, cubemapshader::fs); // to render the Cube map
+    Shader explosionRenderer(explosionshader::vs, explosionshader::fs, explosionshader::gs); // to destroy objects
+    
     float skyboxVertices[] = {
         // positions          
         -1.0f,  1.0f, -1.0f,
@@ -577,24 +261,13 @@ int main()
     };
     unsigned int cubemapTexture = loadCubemap(faces);
     
-    glUseProgram(shaderProgram2);
-    int viewLoc2 = glGetUniformLocation(shaderProgram2, "view");
-    int projLoc2 = glGetUniformLocation(shaderProgram2, "projection");
-    int skyboxLoc2 = glGetUniformLocation(shaderProgram2, "skybox");
-    glUniform1i(skyboxLoc2, 0);
+    environRenderer.use();
+    environRenderer.setInt("skybox", 0);
 
-    glUseProgram(explosionShader);
-    int modelLocN = glGetUniformLocation(explosionShader, "model");
-    int viewLocN = glGetUniformLocation(explosionShader, "view");
-    int projLocN = glGetUniformLocation(explosionShader, "projection");
-    int camposN = glGetUniformLocation(explosionShader, "cameraPos");
-    int skyboxLoc3 = glGetUniformLocation(explosionShader, "skybox");
-    int explodeTimeLoc = glGetUniformLocation(explosionShader, "lifetime");
-    glUniform1i(skyboxLoc3, 0);
-    glUniform1f(explodeTimeLoc, explodeTime);
-    int currentTimepos = glGetUniformLocation(explosionShader, "currentTime");
+    explosionRenderer.use();
+    explosionRenderer.setInt("skybox", 0);
+    explosionRenderer.setFloat("lifetime", explodeTime);
 
-    std::cout << "\n\n" << modelLocN << ":"<<viewLocN << ":" << projLocN << ":"<< camposN<<"\n";
     unsigned int VAO, VBO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -675,18 +348,13 @@ int main()
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT), (void*)0);
     glVertexAttribDivisor(3, 1);
 
-    glUseProgram(shaderProgram);
     glEnable(GL_DEPTH_TEST);
 
     float fov = 45.0f;
-    int modelLoc = glGetUniformLocation(shaderProgram, "model");
-    int viewLoc = glGetUniformLocation(shaderProgram, "view");
-    int projLoc = glGetUniformLocation(shaderProgram, "projection");
-    int lineLoc = glGetUniformLocation(shaderProgram, "linemode");
-    int skyboxLoc = glGetUniformLocation(shaderProgram, "skybox");
-    int campos = glGetUniformLocation(shaderProgram, "cameraPos");
-    glUniform1i(skyboxLoc, 0);
-
+    
+    shapeRenderer.use();
+    shapeRenderer.setInt("skybox", 0);
+    
     glm::vec3 overtime[20];
     for (int i = 0; i < 10; ++i)
     {
@@ -731,11 +399,11 @@ int main()
         model = glm::mat4(1.0f);
         
 #if 1
-        glUseProgram(shaderProgram);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(campos, 1, glm::value_ptr(pos));
+        shapeRenderer.use();
+        shapeRenderer.setMat4("model", model);
+        shapeRenderer.setMat4("view", view);
+        shapeRenderer.setMat4("projection", projection);
+        shapeRenderer.setVec3("cameraPos", pos);
        
         
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
@@ -826,11 +494,11 @@ int main()
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         
         glBindVertexArray(VAO);
-        glUniform1i(lineLoc, 0);
+        shapeRenderer.setInt("linemode", 0);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, 2500);
         
-        glUniform1i(lineLoc, 1);
+        shapeRenderer.setInt("linemode", 1);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, 2);
         
@@ -839,22 +507,26 @@ int main()
         if (explosionIndices.size())
         {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-            glUseProgram(explosionShader);
+            
+            explosionRenderer.use();
+            explosionRenderer.setMat4("model", model);
+            explosionRenderer.setMat4("view", view);
+            explosionRenderer.setMat4("projection", projection);
+            explosionRenderer.setVec3("cameraPos", pos);
+            explosionRenderer.setFloat("currentTime", currentFrame);
+            
             glBindVertexArray(VAO2);
-            glUniformMatrix4fv(modelLocN, 1, GL_FALSE, glm::value_ptr(model));
-            glUniformMatrix4fv(viewLocN, 1, GL_FALSE, glm::value_ptr(view));
-            glUniformMatrix4fv(projLocN, 1, GL_FALSE, glm::value_ptr(projection));
-            glUniform3fv(camposN, 1, glm::value_ptr(pos));
-            glUniform1f(currentTimepos, currentFrame);
             glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, explosionIndices.size());
         }
 
         //glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glDepthFunc(GL_LEQUAL);
-        glUseProgram(shaderProgram2);
         glm::mat4 newView = glm::mat4(glm::mat3(view));
-        glUniformMatrix4fv(viewLoc2, 1, GL_FALSE, glm::value_ptr(newView));
-        glUniformMatrix4fv(projLoc2, 1, GL_FALSE, glm::value_ptr(projection));
+        
+        environRenderer.use();
+        environRenderer.setMat4("view", newView);
+        environRenderer.setMat4("projection", projection);
+
         glBindVertexArray(skyboxVAO);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
