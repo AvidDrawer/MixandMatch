@@ -1,7 +1,9 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <object-source-code.h>
 #include <shader-source-code.h>
+#include <utility>
 #include <Shader.h>
 #include <vector>
 #include <list>
@@ -91,104 +93,9 @@ int main()
 
 
 	int latitude=20, longitude=20;
-	// sphere equation- x2 + y2 + z2 = r22
-	// parameteric form- 
-	// x: rCpCt  
-	// y: rCpSt 
-	// z:rSp
+	std::pair<std::vector<float>,std::vector<int>> sphereRenderData;
+    sphereRenderData = objectDictionary::constructSphere(radius, latitude, longitude);
 
-    const float PI = acos(-1.0f);
-    int sectorCount = longitude;
-    int stackCount = latitude + 1;
-   
-    float x, y, z, xy;                              // vertex position
-    float nx, ny, nz, lengthInv = 1.0f / radius;    // normal
-
-    float sectorStep = 2.0f * PI / sectorCount;
-    float stackStep = PI / stackCount;
-    float sectorAngle, stackAngle;
-
-    std::vector<float> vertices;
-    std::vector<float> normals;
-    std::vector<int> indices;
-    std::vector<float> lineIndices;
-
-    for (int i = 0; i <= stackCount; ++i)
-    {
-        stackAngle = PI / 2 - i * stackStep;        // starting from pi/2 to -pi/2
-        xy = radius * cosf(stackAngle);             // r * cos(u)
-        z = radius * sinf(stackAngle);              // r * sin(u)
-
-        std::cout << sinf(stackAngle);
-        // add (sectorCount+1) vertices per stack
-        // the first and last vertices have same position and normal, but different tex coords
-        for (int j = 0; j <= sectorCount; ++j)
-        {
-            sectorAngle = j * sectorStep;           // starting from 0 to 2pi
-
-            // vertex position
-            x = xy * cosf(sectorAngle);             // r * cos(u) * cos(v)
-            y = xy * sinf(sectorAngle);             // r * cos(u) * sin(v)
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
-
-            // normalized vertex normal
-            nx = x * lengthInv;
-            ny = y * lengthInv;
-            nz = z * lengthInv;
-            normals.push_back(nx);
-            normals.push_back(ny);
-            normals.push_back(nz);
-        }
-    }
-
-    // indices
-    //  k1--k1+1
-    //  |  / |
-    //  | /  |
-    //  k2--k2+1
-    unsigned int k1, k2;
-    for (int i = 0; i < stackCount; ++i)
-    {
-        k1 = i * (sectorCount + 1);     // beginning of current stack
-        k2 = k1 + sectorCount + 1;      // beginning of next stack
-
-        for (int j = 0; j < sectorCount; ++j, ++k1, ++k2)
-        {
-            // 2 triangles per sector excluding 1st and last stacks
-            if (i != 0)
-            {
-                indices.push_back(k1);
-                indices.push_back(k2);
-                indices.push_back(k1 + 1);
-            }
-
-            if (i != (stackCount - 1))
-            {
-                indices.push_back(k1 + 1);
-                indices.push_back(k2);
-                indices.push_back(k2 + 1);
-            }
-        }
-    }
-
-    // generate interleaved vertex array as well
-    std::vector<float> interleavedVertices;
-    std::size_t i, j;
-    std::size_t count = vertices.size();
-    for (i = 0, j = 0; i < count; i += 3, j += 2)
-    {
-        interleavedVertices.push_back(vertices[i]);
-        interleavedVertices.push_back(vertices[i + 1]);
-        interleavedVertices.push_back(vertices[i + 2]);
-
-        interleavedVertices.push_back(normals[i]);
-        interleavedVertices.push_back(normals[i + 1]);
-        interleavedVertices.push_back(normals[i + 2]);
-    }
-
-    
     // Shaders 
     Shader shapeRenderer(primaryshader::vs, primaryshader::fs);   // to render objects
     Shader environRenderer(cubemapshader::vs, cubemapshader::fs); // to render the Cube map
@@ -277,8 +184,8 @@ int main()
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 
-    glBufferData(GL_ARRAY_BUFFER, interleavedVertices.size()*sizeof(float), &interleavedVertices[0], GL_STATIC_DRAW);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(int), &indices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sphereRenderData.first.size()*sizeof(float), &sphereRenderData.first[0], GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereRenderData.second.size() * sizeof(int), &sphereRenderData.second[0], GL_STATIC_DRAW);
 
     
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)0);
@@ -496,11 +403,11 @@ int main()
         glBindVertexArray(VAO);
         shapeRenderer.setInt("linemode", 0);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, 2500);
+        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, 2500);
         
         shapeRenderer.setInt("linemode", 1);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, 2);
+        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, 2);
         
 #endif
 
@@ -516,7 +423,7 @@ int main()
             explosionRenderer.setFloat("currentTime", currentFrame);
             
             glBindVertexArray(VAO2);
-            glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0, explosionIndices.size());
+            glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, explosionIndices.size());
         }
 
         //glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
