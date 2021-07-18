@@ -1,5 +1,5 @@
 #pragma once
-// shaders.h
+// shader-source-code.h
 // Contains the source code for all the shaders used.
 
 namespace primaryshader

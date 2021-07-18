@@ -1,4 +1,5 @@
 #include <glad/glad.h>
+#include <conio.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <object-source-code.h>
@@ -15,46 +16,61 @@
 #include <string>
 #include <algorithm>
 
-const int w_win = 800;
-const int h_win = 600;
+int w_win = 800;
+int h_win = 600;
+
+constexpr float explodeTime = 4.0f;
+constexpr float multiplier = 5;
+constexpr float radius = 0.4f * multiplier;
 
 glm::mat4 model = glm::mat4(1.0f);
 glm::mat4 view = glm::mat4(1.0f);
 glm::mat4 projection = glm::mat4(1.0f);
 
-glm::vec3 pos(0.0f, 100.0f, 65.0f);
-glm::vec3 front(0.0f, 0.0f, -1.0f);
-glm::vec3 up(0.0f, 1.0f, 0.0f);
-glm::vec3 right = glm::normalize(glm::cross(-front, up));
+namespace camera
+{
+    // Chosen coordinate system
+    // +y
+    // |   -z  
+    // |  /
+    // | /
+    // O _ _ _ _ +x
+    
+    // yaw is initialized to -90.0 degrees so that we start by looking towards the -z axis
+    float yaw = -90.0f;	 // rotate about y
+    float pitch = 0.0f;  // rotate about x
 
-float Mposx = 300.0f;
-float Mposy = 300.0f;
+    glm::vec3 playerPosition(0.0f, 100.0f, 65.0f); // same as camera position
+    glm::vec3 frontVector(0.0f, 0.0f, -1.0f);
+    glm::vec3 upVector(0.0f, 1.0f, 0.0f);
+    glm::vec3 rightVector = glm::normalize(glm::cross(-frontVector, upVector));
+}
 
-//time 
-bool firstMouse = true;
-float lastFrame = 0.0f;
-float deltaTime = 0.0f;
-float speed = 50.0f;
-bool mouseMoveMode = false;
-bool objectMoveMode = false;
-bool collisionCheck = false;
-int objectIndex = 0;
-float explodeTime = 4.0f;
-glm::vec3 mouseDir(0.0f,0.0f,0.0f);
+namespace myMouse
+{
+    float posx = 300.0f;
+    float posy = 300.0f;
+
+    bool pointerReset = true;   // set mouse pointer location to the current location
+    float speed = 50.0f;        // mouse sensitivity
+
+    bool moveMode = false;      // tracks mouse button click
+    
+    bool pickedObjectMoveMode = false; // is object picked?
+    int pickedObjectIndex = 0;         // index of picked object
+}
+
+
+
 std::vector<glm::vec3> translations(2500);
 std::vector<int> discardIndices(2500,1);
-float multiplier = 5;
-float radius = 0.4f * multiplier;
-
-float yaw = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
-float pitch = 0.0f;
 std::list<int> gravityIndices;
 std::list<int> explosionIndices;
 std::vector<short> movableObject(2500, 1);
 std::vector<glm::vec3> explosionPositions;
 std::vector<float> explosionStartTimes;
 
-void processInput(GLFWwindow* window);
+void processInput(GLFWwindow* window, float deltaTime);
 void mouse_move_callback(GLFWwindow* window, double posx, double posy);
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 
@@ -62,6 +78,9 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 void window_size_callback(GLFWwindow* window, int width, int height)
 {
     glViewport(0, 0, width, height);
+    
+    w_win = width;
+    h_win = height;
 }
 
 unsigned int loadCubemap(std::vector<std::string> faces);
@@ -262,25 +281,12 @@ int main()
     shapeRenderer.use();
     shapeRenderer.setInt("skybox", 0);
     
-    glm::vec3 overtime[20];
-    for (int i = 0; i < 10; ++i)
-    {
-        glm::vec3 m;
-        m = glm::vec3(0.0f, i*5.0f, 0.0f);
-        overtime[i] = m;
-    }
-    for (int i = 11; i < 20; ++i)
-    {
-        glm::vec3 m;
-        m = glm::vec3(0.0f, (20-i) * 5.0f, 0.0f);
-        overtime[i] = m;
-    }
-
-    
 
     glBindVertexArray(VAO);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     int numFrames = 0; float startTime = 0;
+    float lastFrame = 0.0f;
+    float deltaTime = 0.0f;
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = glfwGetTime();
@@ -295,10 +301,10 @@ int main()
             numFrames = 0;
             startTime = currentFrame;
         }
-        view = glm::lookAt(pos, pos + front, up);
+        view = glm::lookAt(camera::playerPosition, camera::playerPosition + camera::frontVector, camera::upVector);
         projection = glm::perspective(glm::radians(fov), w_win * 1.0f / h_win, 0.1f, 2000.0f);
         
-        processInput(window);
+        processInput(window, deltaTime);
 
         glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -310,14 +316,14 @@ int main()
         shapeRenderer.setMat4("model", model);
         shapeRenderer.setMat4("view", view);
         shapeRenderer.setMat4("projection", projection);
-        shapeRenderer.setVec3("cameraPos", pos);
+        shapeRenderer.setVec3("cameraPos", camera::playerPosition);
        
         
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
         
-        if(objectIndex != -1)
+        if(myMouse::pickedObjectIndex != -1)
         {
-            glBufferSubData(GL_ARRAY_BUFFER, objectIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[objectIndex]));
+            glBufferSubData(GL_ARRAY_BUFFER, myMouse::pickedObjectIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[myMouse::pickedObjectIndex]));
         }
         
         bool explosionAdded = false;
@@ -328,7 +334,7 @@ int main()
             std::list<int>::iterator gravityIterator = gravityIndices.begin();
             while (gravityIterator != gravityIndices.end())
             {
-                if (*gravityIterator == objectIndex)
+                if (*gravityIterator == myMouse::pickedObjectIndex)
                 {
                     ++gravityIterator;
                     continue;
@@ -373,8 +379,7 @@ int main()
             else
             {
                 // nothing to update since geometry shader will do this
-
-                //break;  // "start time sorted"
+                break;  // "start time sorted"
             }
         }
         if (numRemoved || explosionAdded)
@@ -419,7 +424,7 @@ int main()
             explosionRenderer.setMat4("model", model);
             explosionRenderer.setMat4("view", view);
             explosionRenderer.setMat4("projection", projection);
-            explosionRenderer.setVec3("cameraPos", pos);
+            explosionRenderer.setVec3("cameraPos", camera::playerPosition);
             explosionRenderer.setFloat("currentTime", currentFrame);
             
             glBindVertexArray(VAO2);
@@ -450,100 +455,91 @@ int main()
     glfwTerminate();
 
     std::cout << "\nPress any key to quit";
-    getchar();
+    getch();
 	return 0;
 }
 
-void processInput(GLFWwindow* window)
+void processInput(GLFWwindow* window, float deltaTime)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    float cameraSpeed = speed * deltaTime;
+    float cameraSpeed = myMouse::speed * deltaTime;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-    {
-        pos += cameraSpeed * front; 
-        //std::cout << pos[0]<<" " << pos[1] << " " << pos[2] << " " << deltaTime << "\n";
-    }
+        camera::playerPosition += cameraSpeed * camera::frontVector; 
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        pos -= cameraSpeed * front;
+        camera::playerPosition -= cameraSpeed * camera::frontVector;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        pos -= glm::normalize(glm::cross(front, up)) * cameraSpeed;
+        camera::playerPosition -= glm::normalize(glm::cross(camera::frontVector, camera::upVector)) * cameraSpeed;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        pos += glm::normalize(glm::cross(front, up)) * cameraSpeed;
+        camera::playerPosition += glm::normalize(glm::cross(camera::frontVector, camera::upVector)) * cameraSpeed;
 }
 
 void mouse_move_callback(GLFWwindow* window, double posx, double posy)
 {
-    if (!mouseMoveMode)
+    if (!myMouse::moveMode)
         return;
 
-    if (firstMouse)
+    if (myMouse::pointerReset)
     {
-        firstMouse = false;
-        Mposx = posx;
-        Mposy = posy;
+        myMouse::pointerReset = false;
+        myMouse::posx = posx;
+        myMouse::posy = posy;
     }
 
     float offsetx, offsety;
 
-    offsetx = posx - Mposx;
-    offsety = posy - Mposy;
+    offsetx = posx - myMouse::posx;
+    offsety = posy - myMouse::posy;
 
     
-    if (objectMoveMode)
+    if (myMouse::pickedObjectMoveMode)
     {
         //move the sphere. check for collisions first. if colliding, don't update mouse.
         bool collision = false;
         float multiplier = 0.03f;
         
-        glm::vec3 newup = glm::normalize(glm::cross(front, right));
-        glm::vec3 disp = -glm::vec3(multiplier) * (right * offsetx * multiplier + newup * offsety* multiplier);
-        //glm::vec3 disp = { multiplier * offsetx, 0, multiplier * offsety};
+        glm::vec3 newup = glm::normalize(glm::cross(camera::frontVector, camera::rightVector));
+        glm::vec3 disp = -glm::vec3(multiplier) * (camera::rightVector * offsetx * multiplier + newup * offsety* multiplier);
 
         for (int i = 0; i < 2500 && !collision; ++i)
         {
-            if (i != objectIndex)
+            if (i != myMouse::pickedObjectIndex)
             {
-                glm::vec3 diff = translations[i] - (disp + translations[objectIndex]);
+                glm::vec3 diff = translations[i] - (disp + translations[myMouse::pickedObjectIndex]);
                 if (glm::dot(diff,diff) < 4 * radius * radius)
                 {
-                    //std::cout << "\nCollision with index " << i;
                     collision = true;
                     return;
                 }
             }
 
         }
-        translations[objectIndex] += disp;
-        //std::cout << glm::dot(disp,disp) << ":";
+        translations[myMouse::pickedObjectIndex] += disp;
         return;
     }
     
-    Mposx = posx;
-    Mposy = posy;
-
-    //camera.ProcessMouseMovement(offsetx, -offsety);
+    myMouse::posx = posx;
+    myMouse::posy = posy;
 
     float sensitivity = 0.05f;
     offsetx *= sensitivity;
     offsety *= sensitivity;
 
-    yaw += offsetx;
-    pitch -= offsety;
+    camera::yaw += offsetx;
+    camera::pitch -= offsety;
 
-    if (pitch > 89.0f)
-        pitch = 89.0f;
-    if (pitch < -89.0f)
-        pitch = -89.0f;
+    if (camera::pitch > 89.0f)
+        camera::pitch = 89.0f;
+    if (camera::pitch < -89.0f)
+        camera::pitch = -89.0f;
 
     glm::vec3 direction;
-    direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    direction.y = sin(glm::radians(pitch));
-    direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    front = glm::normalize(direction);
-    right = glm::normalize(glm::cross(-front, up));
-    //std::cout << front[0] << ":" << front[1] << ":" << front[2] << "\n";;
+    direction.x = cos(glm::radians(camera::yaw)) * cos(glm::radians(camera::pitch));
+    direction.y = sin(glm::radians(camera::pitch));
+    direction.z = sin(glm::radians(camera::yaw)) * cos(glm::radians(camera::pitch));
+    camera::frontVector = glm::normalize(direction);
+    camera::rightVector = glm::normalize(glm::cross(-camera::frontVector, camera::upVector));
 }
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
@@ -555,8 +551,6 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
         if (action == GLFW_PRESS)
         {
             glfwGetCursorPos(window, &xpos, &ypos);
-            //std::cout << "\nCursor Position at (" << xpos << " : " << ypos << ")";
-
      
             float x = (2.0f * xpos) / w_win - 1.0f;
             float y = 1.0f - (2.0f * ypos) / h_win;
@@ -568,7 +562,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             glm::vec3 dir = (glm::inverse(view) * ray_eye);
             dir = glm::normalize(dir);   
 
-            mouseDir = dir;
+            glm::vec3 mouseDir = dir;
 
             std::pair<int, float> minval = { 0,1000000000 };
             bool chk = false;
@@ -576,7 +570,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             {
                 if (!discardIndices[i])
                     continue;
-                glm::vec3 diff = pos - translations[i];
+                glm::vec3 diff = camera::playerPosition - translations[i];
 
                 float b = glm::dot(mouseDir, diff);
                 float c = glm::dot(diff, diff) - radius * radius;
@@ -587,8 +581,6 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
                 else
                 {
                     chk = true;
-                    //std::cout << "\tcolliding with sphere index " << i;
-
                     float dist = glm::dot(diff, diff);
                     if (dist < minval.second)
                     {
@@ -599,26 +591,25 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             }
             if (chk)
             {
-                //std::cout << "\tclosest sphere index is " << minval.first;
-                objectMoveMode = true;
-                objectIndex = minval.first;
-                mouseMoveMode = true;
-                firstMouse = true;
+                myMouse::pickedObjectMoveMode = true;
+                myMouse::pickedObjectIndex = minval.first;
+                myMouse::moveMode = true;
+                myMouse::pointerReset = true;
             }
         }
         else if (action == GLFW_RELEASE)
         {
-            objectMoveMode = false;
-            mouseMoveMode = false;
-            if (objectIndex != -1)
+            myMouse::pickedObjectMoveMode = false;
+            myMouse::moveMode = false;
+            if (myMouse::pickedObjectIndex != -1)
             {
-                if (movableObject[objectIndex])
+                if (movableObject[myMouse::pickedObjectIndex])
                 {
-                    gravityIndices.push_back(objectIndex);
-                    movableObject[objectIndex] = false;
+                    gravityIndices.push_back(myMouse::pickedObjectIndex);
+                    movableObject[myMouse::pickedObjectIndex] = false;
                 }
             }
-            objectIndex = -1;
+            myMouse::pickedObjectIndex = -1;
         }
     }
     else if (button == GLFW_MOUSE_BUTTON_RIGHT)
@@ -626,13 +617,13 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
         if (action == GLFW_PRESS)
         {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            mouseMoveMode = true;
-            firstMouse = true;
+            myMouse::moveMode = true;
+            myMouse::pointerReset = true;
         }
         else
         {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            mouseMoveMode = false;
+            myMouse::moveMode = false;
         }
     }
 }
