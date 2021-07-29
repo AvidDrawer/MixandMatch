@@ -37,18 +37,18 @@ namespace camera
     // O _ _ _ _ +x
     
     // yaw is initialized to -90.0 degrees so that we start by looking towards the -z axis
-    float yaw = -90.0f;	 // rotate about y
+    float yaw = 90.0f;	 // rotate about y
     float pitch = 0.0f;  // rotate about x
 
-    glm::vec3 playerPosition(0.0f, 100.0f, 65.0f); // same as camera position
-    glm::vec3 frontVector(0.0f, 0.0f, -1.0f);
+    glm::vec3 playerPosition(0.0f, 40.0f, -265.0f); // same as camera position
+    glm::vec3 frontVector(0.0f, 0.0f, 1.0f);
     glm::vec3 upVector(0.0f, 1.0f, 0.0f);
     glm::vec3 rightVector = glm::normalize(glm::cross(-frontVector, upVector));
 }
 
 namespace myMouse
 {
-    float posx = 300.0f;
+    float posx = 400.0f;
     float posy = 300.0f;
 
     bool pointerReset = true;   // set mouse pointer location to the current location
@@ -63,9 +63,8 @@ namespace myMouse
 
 
 std::vector<glm::vec3> translations(2500);
-std::vector<int> discardIndices(2500,1);
+std::vector<int> discardIndices(2500,2);
 std::list<int> gravityIndices;
-std::list<int> explosionIndices;
 std::vector<short> movableObject(2500, 1);
 std::vector<glm::vec3> explosionPositions;
 std::vector<float> explosionStartTimes;
@@ -116,9 +115,8 @@ int main()
     sphereRenderData = objectDictionary::constructSphere(radius, latitude, longitude);
 
     // Shaders 
-    Shader shapeRenderer(primaryshader::vs, primaryshader::fs);   // to render objects
+    Shader shapeRenderer(primaryshader::vs, primaryshader::fs, primaryshader::gs);   // to render objects and oversee destruction ;)
     Shader environRenderer(cubemapshader::vs, cubemapshader::fs); // to render the Cube map
-    Shader explosionRenderer(explosionshader::vs, explosionshader::fs, explosionshader::gs); // to destroy objects
     
     float skyboxVertices[] = {
         // positions          
@@ -190,10 +188,6 @@ int main()
     environRenderer.use();
     environRenderer.setInt("skybox", 0);
 
-    explosionRenderer.use();
-    explosionRenderer.setInt("skybox", 0);
-    explosionRenderer.setFloat("lifetime", explodeTime);
-
     unsigned int VAO, VBO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -226,8 +220,9 @@ int main()
             ++index;
         }
     }
+    explosionStartTimes = std::vector<float>(translations.size(), -1.0f);
 
-    unsigned int instanceVBO, rendercheckVBO;
+    unsigned int instanceVBO, rendercheckVBO, explosionTimeVBO;
     glGenBuffers(1, &instanceVBO);
     glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 2500, &translations[0], GL_DYNAMIC_DRAW);
@@ -242,37 +237,13 @@ int main()
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_INT), (void*)0);
     glVertexAttribDivisor(3, 1);
 
-
-    unsigned int VAO2;
-    glGenVertexArrays(1, &VAO2);
-
-    glBindVertexArray(VAO2);
-
-    explosionPositions = translations;
-    explosionStartTimes = std::vector<float>(translations.size(), 0.0f);
-    unsigned int instanceVBO2, explosionTimeVBO;
-    glGenBuffers(1, &instanceVBO2);
-    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO2);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * explosionPositions.size(), &explosionPositions[0], GL_DYNAMIC_DRAW);
-
     glGenBuffers(1, &explosionTimeVBO);
     glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * explosionStartTimes.size(), &explosionStartTimes[0], GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT)* explosionStartTimes.size(), &explosionStartTimes[0], GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT), (void*)0);
+    glVertexAttribDivisor(4, 1);
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)(3 * sizeof(GL_FLOAT)));
-    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO2);
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
-    glVertexAttribDivisor(2, 1);
-    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT), (void*)0);
-    glVertexAttribDivisor(3, 1);
 
     glEnable(GL_DEPTH_TEST);
 
@@ -280,13 +251,15 @@ int main()
     
     shapeRenderer.use();
     shapeRenderer.setInt("skybox", 0);
-    
+    shapeRenderer.setFloat("lifetime", explodeTime);
 
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     int numFrames = 0; float startTime = 0;
     float lastFrame = 0.0f;
     float deltaTime = 0.0f;
+    int lastInstanceIndex = 2499;
+    int finalSwapIndex = 2499;
+
+    model = glm::mat4(1.0f);
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = glfwGetTime();
@@ -306,19 +279,10 @@ int main()
         
         processInput(window, deltaTime);
 
-        glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
+        //glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        model = glm::mat4(1.0f);
-        
 #if 1
-        shapeRenderer.use();
-        shapeRenderer.setMat4("model", model);
-        shapeRenderer.setMat4("view", view);
-        shapeRenderer.setMat4("projection", projection);
-        shapeRenderer.setVec3("cameraPos", camera::playerPosition);
-       
-        
         glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
         
         if(myMouse::pickedObjectIndex != -1)
@@ -352,14 +316,19 @@ int main()
 
                 if (remove)
                 {
-                    explosionIndices.push_back(*gravityIterator);
-                    explosionPositions[explosionIndices.size() - 1] = translations[*gravityIterator];
-                    explosionStartTimes[explosionIndices.size() - 1] = currentFrame;
-                    
-                    discardIndices[*gravityIterator] = 0;
-                    glBindBuffer(GL_ARRAY_BUFFER, rendercheckVBO);
-                    glBufferSubData(GL_ARRAY_BUFFER, *gravityIterator * sizeof(int), sizeof(int), &discardIndices[*gravityIterator]);
+                    std::swap(translations[finalSwapIndex], translations[*gravityIterator]);
+                    discardIndices[finalSwapIndex] = 0;
+                    explosionStartTimes[finalSwapIndex] = currentFrame;
 
+                    glBufferSubData(GL_ARRAY_BUFFER, finalSwapIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[finalSwapIndex]));
+                    glBufferSubData(GL_ARRAY_BUFFER, *gravityIterator * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[*gravityIterator]));
+
+                    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, finalSwapIndex * sizeof(float), sizeof(float), &explosionStartTimes[finalSwapIndex]);
+
+                    glBindBuffer(GL_ARRAY_BUFFER, rendercheckVBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, finalSwapIndex * sizeof(int), sizeof(int), &discardIndices[finalSwapIndex]);
+                    --finalSwapIndex;
                     gravityIterator = gravityIndices.erase(gravityIterator);
                     explosionAdded = true;
                 }
@@ -369,67 +338,33 @@ int main()
         }
 
         int numRemoved = 0;
-        for (int i = 0; i < explosionIndices.size(); ++i)
+        for (int i = lastInstanceIndex; i >= finalSwapIndex; --i)
         {
-            if (currentFrame - explosionStartTimes[i] > explodeTime)
-            {
-                // remove from here
+            if (explosionStartTimes[i] > 0 && currentFrame - explosionStartTimes[i] > explodeTime)
                 ++numRemoved;
-            }
             else
-            {
-                // nothing to update since geometry shader will do this
-                break;  // "start time sorted"
-            }
+                break;
         }
-        if (numRemoved || explosionAdded)
-        {
-            if (explosionIndices.size() - numRemoved)
-            {
-                if (numRemoved)
-                {
-                    std::copy(explosionStartTimes.begin() + numRemoved, explosionStartTimes.begin() + explosionIndices.size(), explosionStartTimes.begin());
-                    std::copy(explosionPositions.begin() + numRemoved, explosionPositions.begin() + explosionIndices.size(), explosionPositions.begin());
-                }
-                glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
-                glBufferSubData(GL_ARRAY_BUFFER, 0, (explosionIndices.size() - numRemoved) * sizeof(GL_FLOAT), &explosionStartTimes[0]);
-                glBindBuffer(GL_ARRAY_BUFFER, instanceVBO2);
-                glBufferSubData(GL_ARRAY_BUFFER, 0, (explosionIndices.size() - numRemoved) * sizeof(glm::vec3), glm::value_ptr(explosionPositions[0]));
-            }
-
-            if(numRemoved > 0)
-                while (numRemoved--)
-                {
-                    explosionIndices.pop_front();
-                }
-        }
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        lastInstanceIndex -= numRemoved;        
+                
+        shapeRenderer.use();
+        shapeRenderer.setMat4("model", model);
+        shapeRenderer.setMat4("view", view);
+        shapeRenderer.setMat4("projection", projection);
+        shapeRenderer.setVec3("cameraPos", camera::playerPosition);
+        shapeRenderer.setFloat("currentTime", currentFrame);
         
         glBindVertexArray(VAO);
-        shapeRenderer.setInt("linemode", 0);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, 2500);
         
         shapeRenderer.setInt("linemode", 1);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, 2);
+
+        shapeRenderer.setInt("linemode", 0);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, lastInstanceIndex + 1);
         
 #endif
-
-        if (explosionIndices.size())
-        {
-            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-            
-            explosionRenderer.use();
-            explosionRenderer.setMat4("model", model);
-            explosionRenderer.setMat4("view", view);
-            explosionRenderer.setMat4("projection", projection);
-            explosionRenderer.setVec3("cameraPos", camera::playerPosition);
-            explosionRenderer.setFloat("currentTime", currentFrame);
-            
-            glBindVertexArray(VAO2);
-            glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, explosionIndices.size());
-        }
 
         //glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glDepthFunc(GL_LEQUAL);
@@ -444,7 +379,6 @@ int main()
         glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glDrawArrays(GL_TRIANGLES, 0, 36);
-        glBindVertexArray(0);
         glDepthFunc(GL_LESS);
 
 
@@ -564,7 +498,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 
             glm::vec3 mouseDir = dir;
 
-            std::pair<int, float> minval = { 0,1000000000 };
+            std::pair<int, float> minval = { 0,1000000000.0f };
             bool chk = false;
             for (int i = 0; i < 2500; ++i)
             {
@@ -603,7 +537,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             myMouse::moveMode = false;
             if (myMouse::pickedObjectIndex != -1)
             {
-                if (movableObject[myMouse::pickedObjectIndex])
+                if (movableObject[myMouse::pickedObjectIndex])  // to prevent 2x 'gravity' effect. hack
                 {
                     gravityIndices.push_back(myMouse::pickedObjectIndex);
                     movableObject[myMouse::pickedObjectIndex] = false;
