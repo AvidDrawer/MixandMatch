@@ -14,3 +14,11 @@ To change the background, change the images inside the Skybox folder.
 
 To build, run CMake on the source directory- preferably into a build directory.
 Open the corresponding visual studio solution and build the project. Then build the Install project. This will create a bin folder that will contain the executable. 
+
+
+Plans-
+1. Use a bounding volume hierarchy for object picking and collision detection [NEXT]
+2. Implement multiple reflections
+3. Allow different shapes- spheres, pyramids, cuboids etc. inheritance vs templating. Perhaps assimp based model loading?!
+4. decoupling the render thread from the calculations  [UNDERWAY]
+5. ray tracing (?)
