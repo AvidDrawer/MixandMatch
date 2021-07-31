@@ -114,8 +114,10 @@ int main()
 	std::pair<std::vector<float>,std::vector<int>> sphereRenderData;
     sphereRenderData = objectDictionary::constructSphere(radius, latitude, longitude);
 
-    // Shaders 
-    Shader shapeRenderer(primaryshader::vs, primaryshader::fs, primaryshader::gs);   // to render objects and oversee destruction ;)
+    // Shaders
+    // Geometry shaders are expensive. using different render/destroy shaders saves ~9ms per frame!
+    Shader shapeRenderer(primaryshader::vs, primaryshader::fs);   // to render objects
+    Shader explosionRenderer(primaryshader::vs, primaryshader::fs, primaryshader::gs);   // oversee destruction ;)
     Shader environRenderer(cubemapshader::vs, cubemapshader::fs); // to render the Cube map
     
     float skyboxVertices[] = {
@@ -220,9 +222,8 @@ int main()
             ++index;
         }
     }
-    explosionStartTimes = std::vector<float>(translations.size(), -1.0f);
 
-    unsigned int instanceVBO, rendercheckVBO, explosionTimeVBO;
+    unsigned int instanceVBO;
     glGenBuffers(1, &instanceVBO);
     glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 2500, &translations[0], GL_DYNAMIC_DRAW);
@@ -230,19 +231,41 @@ int main()
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
     glVertexAttribDivisor(2, 1);
 
-    glGenBuffers(1, &rendercheckVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, rendercheckVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(int) * 2500, &discardIndices[0], GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_INT), (void*)0);
-    glVertexAttribDivisor(3, 1);
+    explosionStartTimes = std::vector<float>(translations.size(), -1.0f);
+    explosionPositions = translations;
 
-    glGenBuffers(1, &explosionTimeVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
+    unsigned int VAOex, VBOex, EBOex;
+    glGenVertexArrays(1, &VAOex);
+    glGenBuffers(1, &VBOex);
+    glGenBuffers(1, &EBOex);
+
+    glBindVertexArray(VAOex);
+    glBindBuffer(GL_ARRAY_BUFFER, VBOex);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOex);
+
+    glBufferData(GL_ARRAY_BUFFER, sphereRenderData.first.size() * sizeof(float), &sphereRenderData.first[0], GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereRenderData.second.size() * sizeof(int), &sphereRenderData.second[0], GL_STATIC_DRAW);
+
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GL_FLOAT), (void*)(3 * sizeof(GL_FLOAT)));
+    glEnableVertexAttribArray(1);
+
+    unsigned int instanceVBOex, rendercheckVBOex, explosionTimeVBOex;
+    glGenBuffers(1, &instanceVBOex);
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBOex);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * 2500, &explosionPositions[0], GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+    glVertexAttribDivisor(2, 1);
+
+    glGenBuffers(1, &explosionTimeVBOex);
+    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBOex);
     glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT)* explosionStartTimes.size(), &explosionStartTimes[0], GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(4);
-    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT), (void*)0);
-    glVertexAttribDivisor(4, 1);
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT), (void*)0);
+    glVertexAttribDivisor(3, 1);
 
 
     glEnable(GL_DEPTH_TEST);
@@ -251,13 +274,16 @@ int main()
     
     shapeRenderer.use();
     shapeRenderer.setInt("skybox", 0);
-    shapeRenderer.setFloat("lifetime", explodeTime);
+
+    explosionRenderer.use();
+    explosionRenderer.setInt("skybox", 0);
+    explosionRenderer.setFloat("lifetime", explodeTime);
 
     int numFrames = 0; float startTime = 0;
     float lastFrame = 0.0f;
     float deltaTime = 0.0f;
-    int lastInstanceIndex = 2499;
     int finalSwapIndex = 2499;
+    int explodeIndex = 0;
 
     model = glm::mat4(1.0f);
     while (!glfwWindowShouldClose(window))
@@ -279,7 +305,7 @@ int main()
         
         processInput(window, deltaTime);
 
-        //glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
+        glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 #if 1
@@ -318,16 +344,21 @@ int main()
                 {
                     std::swap(translations[finalSwapIndex], translations[*gravityIterator]);
                     discardIndices[finalSwapIndex] = 0;
-                    explosionStartTimes[finalSwapIndex] = currentFrame;
-
+                    
+                    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
                     glBufferSubData(GL_ARRAY_BUFFER, finalSwapIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[finalSwapIndex]));
                     glBufferSubData(GL_ARRAY_BUFFER, *gravityIterator * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(translations[*gravityIterator]));
 
-                    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBO);
-                    glBufferSubData(GL_ARRAY_BUFFER, finalSwapIndex * sizeof(float), sizeof(float), &explosionStartTimes[finalSwapIndex]);
+                    explosionPositions[explodeIndex] = translations[finalSwapIndex];
+                    explosionStartTimes[explodeIndex] = currentFrame;
 
-                    glBindBuffer(GL_ARRAY_BUFFER, rendercheckVBO);
-                    glBufferSubData(GL_ARRAY_BUFFER, finalSwapIndex * sizeof(int), sizeof(int), &discardIndices[finalSwapIndex]);
+                    glBindBuffer(GL_ARRAY_BUFFER, instanceVBOex);
+                    glBufferSubData(GL_ARRAY_BUFFER, explodeIndex * sizeof(glm::vec3), sizeof(glm::vec3), glm::value_ptr(explosionPositions[explodeIndex]));
+
+                    glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBOex);
+                    glBufferSubData(GL_ARRAY_BUFFER, explodeIndex * sizeof(float), sizeof(float), &explosionStartTimes[explodeIndex]);
+                    ++explodeIndex;
+                    
                     --finalSwapIndex;
                     gravityIterator = gravityIndices.erase(gravityIterator);
                     explosionAdded = true;
@@ -338,15 +369,30 @@ int main()
         }
 
         int numRemoved = 0;
-        for (int i = lastInstanceIndex; i >= finalSwapIndex; --i)
+        for (int i = 0; i < explodeIndex; ++i)
         {
             if (explosionStartTimes[i] > 0 && currentFrame - explosionStartTimes[i] > explodeTime)
                 ++numRemoved;
             else
                 break;
         }
-        lastInstanceIndex -= numRemoved;        
-                
+        if (numRemoved)
+        {
+            std::copy(explosionPositions.begin() + numRemoved, explosionPositions.begin() + explodeIndex, explosionPositions.begin());
+            std::copy(explosionStartTimes.begin() + numRemoved, explosionStartTimes.begin() + explodeIndex, explosionStartTimes.begin());
+
+            explodeIndex -= numRemoved;
+
+            if (explodeIndex)
+            {
+                glBindBuffer(GL_ARRAY_BUFFER, instanceVBOex);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, explodeIndex * sizeof(glm::vec3), glm::value_ptr(explosionPositions[0]));
+
+                glBindBuffer(GL_ARRAY_BUFFER, explosionTimeVBOex);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, explodeIndex * sizeof(float), &explosionStartTimes[0]);
+            }
+        }
+
         shapeRenderer.use();
         shapeRenderer.setMat4("model", model);
         shapeRenderer.setMat4("view", view);
@@ -362,8 +408,20 @@ int main()
 
         shapeRenderer.setInt("linemode", 0);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, lastInstanceIndex + 1);
+        glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, finalSwapIndex + 1);
         
+        if (explodeIndex)
+        {
+            explosionRenderer.use();
+            explosionRenderer.setMat4("model", model);
+            explosionRenderer.setMat4("view", view);
+            explosionRenderer.setMat4("projection", projection);
+            explosionRenderer.setVec3("cameraPos", camera::playerPosition);
+            explosionRenderer.setFloat("currentTime", currentFrame);
+
+            glBindVertexArray(VAOex);
+            glDrawElementsInstanced(GL_TRIANGLES, (unsigned int)sphereRenderData.second.size(), GL_UNSIGNED_INT, 0, explodeIndex);
+        }
 #endif
 
         //glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);

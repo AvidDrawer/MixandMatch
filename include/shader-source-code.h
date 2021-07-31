@@ -9,8 +9,7 @@ namespace primaryshader
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNorm;
 layout(location = 2) in vec3 offset;
-layout(location = 3) in int render;
-layout(location = 4) in float startExplodingTime;
+layout(location = 3) in float startExplodingTime;
 
 uniform mat4 model;
 uniform mat4 view;
@@ -24,7 +23,6 @@ out VS_OUT{
     vec3 normal;
     vec3 posf;
     float time;
-    int discardit;
 } vs_out;
 void main()
 {
@@ -35,7 +33,6 @@ void main()
     vs_out.posf = vec3(model * vec4(aPos+offset, 1.0f));
     vs_out.normal = normalize(mat3(transpose(inverse(model))) * aNorm);
     vs_out.time = currentTime - startExplodingTime;
-    vs_out.discardit = render;
 }
 )glsl";
 
@@ -72,7 +69,6 @@ in VS_OUT{
     vec3 normal;
     vec3 posf;
     float time;
-    int discardit;
 } gs_in[];
 
 uniform float lifetime;
@@ -81,26 +77,6 @@ out vec3 Posf;
 out vec3 Normf;
 void main()
 {
-   if(gs_in[0].discardit>1)
-   {
-       gl_Position = gl_in[0].gl_Position;
-       Posf = gs_in[0].posf;
-       Normf = gs_in[0].normal;
-       EmitVertex();
-
-       gl_Position = gl_in[1].gl_Position;
-       Posf = gs_in[1].posf;
-       Normf = gs_in[1].normal;
-       EmitVertex();
-
-       gl_Position = gl_in[2].gl_Position;
-       Posf = gs_in[2].posf;
-       Normf = gs_in[2].normal;
-       EmitVertex();
-       EndPrimitive();
-   }
-   else
-   {
    vec3 v1 = vec3(gl_in[0].gl_Position) - vec3(gl_in[1].gl_Position);
    vec3 v2 = vec3(gl_in[2].gl_Position) - vec3(gl_in[1].gl_Position);
    vec3 n = cross(v1, v2);
@@ -129,7 +105,6 @@ void main()
    Normf = gs_in[2].normal;
    EmitVertex();
    EndPrimitive();
-   }
 }
 )glsl";
 }
