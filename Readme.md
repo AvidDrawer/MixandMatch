@@ -20,5 +20,5 @@ Plans-
 1. Use a bounding volume hierarchy for object picking and collision detection [NEXT]
 2. Implement multiple reflections
 3. Allow different shapes- spheres, pyramids, cuboids etc. inheritance vs templating. Perhaps assimp based model loading?!
-4. decoupling the render thread from the calculations  [UNDERWAY]
+4. decoupling the render thread from the calculations  [separated-render-thread branch]
 5. ray tracing (?)
