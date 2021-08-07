@@ -18,6 +18,7 @@
 #include <separateRenderer.h>
 #include <thread>
 #include <glm/gtx/string_cast.hpp>
+#include <chrono>
 
 
 int w_win = 800;
@@ -119,16 +120,10 @@ void threadfun(GLFWwindow* window)
     };
     unsigned int cubemapTexture = loadCubemap(faces);
 
-    Shader shapeRenderer(separateRenderer::updatelist[0].shaderListing[0].c_str(), 
-                            separateRenderer::updatelist[0].shaderListing[1].c_str());   // to render objects
-    
-    Shader explosionRenderer(separateRenderer::updatelist[1].shaderListing[0].c_str(), 
-                                separateRenderer::updatelist[1].shaderListing[1].c_str(),
-                                    separateRenderer::updatelist[1].shaderListing[2].c_str());   // oversee destruction ;)
-                                    
-    Shader environRenderer(separateRenderer::updatelist[2].shaderListing[0].c_str(), 
-                                separateRenderer::updatelist[2].shaderListing[1].c_str()); // to render the Cube map
-
+    auto myst = std::chrono::high_resolution_clock::now();
+    auto myen = std::chrono::high_resolution_clock::now();
+    auto mydur = std::chrono::duration_cast<std::chrono::milliseconds>(myen - myst);
+    int myct = 0;
     glEnable(GL_DEPTH_TEST);
     while (!separateRenderer::stop.load())
     {
@@ -136,6 +131,17 @@ void threadfun(GLFWwindow* window)
         long long otherval = separateRenderer::otherptr.load();
         if (thisval - otherval > 0)
         {
+            ++myct;
+            if (mydur.count() > 1000)
+            {
+                std::cout << "\n\t\trender time, ct: " << (1000.0f / myct) << "ms, " << myct;
+                myct = 0;
+                mydur = std::chrono::duration_cast<std::chrono::milliseconds>(myen - myen);
+            }
+
+            myst = std::chrono::high_resolution_clock::now();
+            
+            
             separateRenderer::otherptr.fetch_add(1);
             glClearColor(0.82f, 0.82f, 0.82f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -143,107 +149,31 @@ void threadfun(GLFWwindow* window)
             std::vector<separateRenderer::bufferData>& currFrameData = thisval % 2 ? separateRenderer::updatelist : separateRenderer::updatelist2;
             std::vector<separateRenderer::bufferData>& prevFrameData = thisval % 2 ? separateRenderer::updatelist2 : separateRenderer::updatelist;
 
-            //update all uniforms
-            shapeRenderer.use();
-            for (auto mypair : currFrameData[0].uniformListing)
-            {
-                switch (currFrameData[0].uniformValues[mypair.second].index())
-                {
-                case 0:shapeRenderer.setInt(mypair.first, std::get<int>(currFrameData[0].uniformValues[mypair.second])); break;
-                case 1:shapeRenderer.setFloat(mypair.first, std::get<float>(currFrameData[0].uniformValues[mypair.second])); break;
-                case 2:shapeRenderer.setVec3(mypair.first, std::get<glm::vec3>(currFrameData[0].uniformValues[mypair.second])); break;
-                case 3:shapeRenderer.setMat4(mypair.first, std::get<glm::mat4>(currFrameData[0].uniformValues[mypair.second])); break;
-                }
-            }
+            // this can be unified into a single function that loops over all available "objects". 
+            // Paused till texture support is completed
 
-            // update buffer data 
-            // ideally, all updates to a buffer should be done first before moving to next to minimize state changes
-            // to-do
-            for (int i = 0; i < currFrameData[0].listofbufferchanges.size(); ++i)
-            {
-                int ind = currFrameData[0].listofbufferchanges[i][0];
-                void* firstelemptr = std::visit(separateRenderer::getElementPointerVisitor{}, currFrameData[0].allData[ind+1]);
-                int elemsize = std::visit(separateRenderer::getElementSizeVisitor{}, currFrameData[0].allData[ind+1]);
-                int offset = currFrameData[0].listofbufferchanges[i][1];
-                int length = currFrameData[0].listofbufferchanges[i][2];
+            // update all uniforms, update buffer data and draw
+            separateRenderer::updateUniforms(currFrameData[0], separateRenderer::renderlist[0].sh);
+            separateRenderer::updateBuffers(currFrameData[0], separateRenderer::renderlist[0]);
+            draw(currFrameData[0], separateRenderer::renderlist[0]);
 
-                int startlocind = currFrameData[0].bufferlocations[i];
-                char* myptr = (char*)firstelemptr + elemsize* startlocind;
-                int vboi = separateRenderer::renderlist[0].vbo[ind];
-
-                glBindBuffer(GL_ARRAY_BUFFER, vboi);
-                glBufferSubData(GL_ARRAY_BUFFER, offset, length, (void*)myptr);
-            }
-            
-
-            // draw
-            glBindVertexArray(separateRenderer::renderlist[0].vao);            
-            if (currFrameData[0].instanced)
-            {
-                if (currFrameData[0].drawarrays)
-                    glDrawArraysInstanced(currFrameData[0].primitiveType, 0, currFrameData[0].vertexIndexCount, currFrameData[0].instanceCount);
-                else
-                    glDrawElementsInstanced(currFrameData[0].primitiveType, (unsigned int)currFrameData[0].vertexIndexCount, GL_UNSIGNED_INT, 0, currFrameData[0].instanceCount);
-            }
-
-
-
-            explosionRenderer.use();
-            for (auto mypair : currFrameData[1].uniformListing)
-            {
-                switch (currFrameData[1].uniformValues[mypair.second].index())
-                {
-                case 0:explosionRenderer.setInt(mypair.first, std::get<int>(currFrameData[1].uniformValues[mypair.second])); break;
-                case 1:explosionRenderer.setFloat(mypair.first, std::get<float>(currFrameData[1].uniformValues[mypair.second])); break;
-                case 2:explosionRenderer.setVec3(mypair.first, std::get<glm::vec3>(currFrameData[1].uniformValues[mypair.second])); break;
-                case 3:explosionRenderer.setMat4(mypair.first, std::get<glm::mat4>(currFrameData[1].uniformValues[mypair.second])); break;
-                }
-            }
-
-            for (int i = 0; i < currFrameData[1].listofbufferchanges.size(); ++i)
-            {
-                int ind = currFrameData[1].listofbufferchanges[i][0];
-                void* firstelemptr = std::visit(separateRenderer::getElementPointerVisitor{}, currFrameData[1].allData[ind + 1]);
-                int elemsize = std::visit(separateRenderer::getElementSizeVisitor{}, currFrameData[1].allData[ind + 1]);
-                int offset = currFrameData[1].listofbufferchanges[i][1];
-                int length = currFrameData[1].listofbufferchanges[i][2];
-
-                int startlocind = currFrameData[1].bufferlocations[i];
-                char* myptr = (char*)firstelemptr + elemsize * startlocind;
-                int vboi = separateRenderer::renderlist[1].vbo[ind];
-
-                glBindBuffer(GL_ARRAY_BUFFER, vboi);
-                glBufferSubData(GL_ARRAY_BUFFER, offset, length, (void*)myptr);
-            }
-
-            glBindVertexArray(separateRenderer::renderlist[1].vao);
-            if (currFrameData[1].instanced)
-            {
-                if (currFrameData[1].drawarrays)
-                    glDrawArraysInstanced(currFrameData[1].primitiveType, 0, currFrameData[1].vertexIndexCount, currFrameData[1].instanceCount);
-                else
-                {
-                    if (currFrameData[1].instanceCount)
-                    {
-                        glDrawElementsInstanced(currFrameData[1].primitiveType, (unsigned int)currFrameData[1].vertexIndexCount, GL_UNSIGNED_INT, 0, currFrameData[1].instanceCount);
-
-                        //std::cout << "\tinstance count:" << currFrameData[1].instanceCount;
-                    }
-                }
-            }
+            // update all uniforms, update buffer data and draw
+            separateRenderer::updateUniforms(currFrameData[1], separateRenderer::renderlist[1].sh);
+            separateRenderer::updateBuffers(currFrameData[1], separateRenderer::renderlist[1]);
+            draw(currFrameData[1], separateRenderer::renderlist[1]);
 
 
 
 
-            environRenderer.use();
+            separateRenderer::renderlist[2].sh.use();
             for (auto mypair : currFrameData[2].uniformListing)
             {
                 switch (currFrameData[2].uniformValues[mypair.second].index())
                 {
-                case 0:environRenderer.setInt(mypair.first, std::get<int>(currFrameData[2].uniformValues[mypair.second])); break;
-                case 1:environRenderer.setFloat(mypair.first, std::get<float>(currFrameData[2].uniformValues[mypair.second])); break;
-                case 2:environRenderer.setVec3(mypair.first, std::get<glm::vec3>(currFrameData[2].uniformValues[mypair.second])); break;
-                case 3:environRenderer.setMat4(mypair.first, std::get<glm::mat4>(currFrameData[2].uniformValues[mypair.second])); break;
+                case 0:separateRenderer::renderlist[2].sh.setInt(mypair.first, std::get<int>(currFrameData[2].uniformValues[mypair.second])); break;
+                case 1:separateRenderer::renderlist[2].sh.setFloat(mypair.first, std::get<float>(currFrameData[2].uniformValues[mypair.second])); break;
+                case 2:separateRenderer::renderlist[2].sh.setVec3(mypair.first, std::get<glm::vec3>(currFrameData[2].uniformValues[mypair.second])); break;
+                case 3:separateRenderer::renderlist[2].sh.setMat4(mypair.first, std::get<glm::mat4>(currFrameData[2].uniformValues[mypair.second])); break;
                 }
             }
 
@@ -260,12 +190,15 @@ void threadfun(GLFWwindow* window)
             }
             else
             {
-                glDrawArrays(currFrameData[2].primitiveType, 0, currFrameData[2].vertexIndexCount);
+                //glDrawArrays(currFrameData[2].primitiveType, 0, currFrameData[2].vertexIndexCount);
             }
             glDepthFunc(GL_LESS);
 
             //currFrameData[0];
             glfwSwapBuffers(window);
+
+            myen = std::chrono::high_resolution_clock::now();
+            mydur += std::chrono::duration_cast<std::chrono::milliseconds>(myen - myst);
         }        
     }
 }
@@ -441,24 +374,40 @@ int main()
     // is event polling asynchronous? Does it occupy the current render time or the next frame's render time?
     // and hence, should we poll at the start of the frame or at the end??
     model = glm::mat4(1.0f);
+
+
+    auto myst = std::chrono::high_resolution_clock::now();
+    auto myen = std::chrono::high_resolution_clock::now();
+    auto mydur = std::chrono::duration_cast<std::chrono::milliseconds>(myen-myst);
+    int myct = 0;
     while (!glfwWindowShouldClose(window))
     {
         long long thisval = separateRenderer::myptr.load();
         long long otherval = separateRenderer::otherptr.load();
         if (thisval - otherval == 0)
         {
+            if (mydur.count() > 1000)
+            {
+                std::cout << "\nupd time, ct: " << (1000.0f / myct) << "ms, " << myct;
+                myct = 0;
+                mydur = std::chrono::duration_cast<std::chrono::milliseconds>(myen - myen);
+            }
+            
+            myst = std::chrono::high_resolution_clock::now();
+            
+
             float currentFrame = glfwGetTime();
             deltaTime = currentFrame - lastFrame;
             lastFrame = currentFrame;
 
             ++numFrames;
-            if (currentFrame - startTime >= 1.0f)
+            /*if (currentFrame - startTime >= 1.0f)
             {
                 std::cout << "\nAverage render time: " << (1000.0f / numFrames) << " ms";
                 std::cout << "\t\tFrames per second: " << numFrames;
                 numFrames = 0;
                 startTime = currentFrame;
-            }
+            }*/
             
             processInput(window, deltaTime);
 
@@ -467,7 +416,6 @@ int main()
 
             std::vector<separateRenderer::bufferData>& currFrameData = thisval % 2? separateRenderer::updatelist2:separateRenderer::updatelist;
             std::vector<separateRenderer::bufferData>& prevFrameData = thisval % 2 ? separateRenderer::updatelist : separateRenderer::updatelist2;
-            //std::vector<separateRenderer::bufferData>& prevFrameData = separateRenderer::updatelist2;
 
             auto& currFrameObjectOffsets = std::get<std::vector<glm::vec3>>(currFrameData[0].allData[2]);
             auto& prevFrameObjectOffsets = std::get<std::vector<glm::vec3>>(prevFrameData[0].allData[2]);
@@ -475,31 +423,8 @@ int main()
             auto& currFrameExplodeOffsets = std::get<std::vector<glm::vec3>>(currFrameData[1].allData[2]);
             auto& currFrameExplodeTimes = std::get<std::vector<float>>(currFrameData[1].allData[3]);
 
-            // SOURCE OF ERROR. THE BUFFER UPDATES ARE NOT CARRYING THROUGH CONSISTENTLY FROM THE FIRST FRAME OBJECT TO THE SECOND
-            // AND THEN BACK TO THE FIRST AND ......
             //make buffer updates from previous frame
-            for (int i = 0; i < prevFrameData.size(); ++i)
-            {
-                for (int j = 0; j < prevFrameData[i].listofbufferchanges.size(); ++j)
-                {
-                    int ind = prevFrameData[i].listofbufferchanges[j][0]+1;
-                    int ind2 = prevFrameData[i].bufferlocations[j];
-                    switch (prevFrameData[i].allData[ind].index())
-                    {
-                    case 0:break;
-                    case 1:std::get<std::vector<float>>(currFrameData[i].allData[ind])[ind2] = std::get<std::vector<float>>(prevFrameData[i].allData[ind])[ind2]; break;
-                    case 2:std::get<std::vector<glm::vec3>>(currFrameData[i].allData[ind])[ind2] = std::get<std::vector<glm::vec3>>(prevFrameData[i].allData[ind])[ind2]; break;
-                    }
-                }
-                currFrameData[i].instanceCount = prevFrameData[i].instanceCount;
-            }
-
-            // reset current frame updates
-            for (int i = 0; i < currFrameData.size(); ++i)
-            {
-                currFrameData[i].listofbufferchanges.clear();
-                currFrameData[i].bufferlocations.clear();
-            }
+            separateRenderer::frameUpdate(currFrameData, prevFrameData);
 
 #if 1
             if (myMouse::leftMouseClick)
@@ -569,8 +494,7 @@ int main()
                 currFrameObjectOffsets[myMouse::pickedObjectIndex] += myMouse::pickedObjectOffset;
 
                 //std::cout << glm::to_string(myMouse::pickedObjectOffset);
-                currFrameData[0].listofbufferchanges.push_back({ 1,(int)myMouse::pickedObjectIndex * (int)sizeof(glm::vec3),sizeof(glm::vec3) });
-                currFrameData[0].bufferlocations.push_back(myMouse::pickedObjectIndex);
+                currFrameData[0].listofbufferchanges.push_back({ 1,(int)myMouse::pickedObjectIndex * (int)sizeof(glm::vec3),sizeof(glm::vec3), myMouse::pickedObjectIndex });
             }
 #endif
             if (gravityIndices.size())
@@ -594,27 +518,20 @@ int main()
                         remove = true;
                     }
                     
-                    currFrameData[0].listofbufferchanges.push_back({ 1,(int)*gravityIterator * (int)sizeof(glm::vec3),sizeof(glm::vec3) });
-                    currFrameData[0].bufferlocations.push_back(*gravityIterator);
+                    currFrameData[0].listofbufferchanges.push_back({ 1,(int)*gravityIterator * (int)sizeof(glm::vec3),sizeof(glm::vec3), *gravityIterator });
                     if (remove)
                     {
                         std::swap(currFrameObjectOffsets[finalSwapIndex], currFrameObjectOffsets[*gravityIterator]);
                         discardIndices[finalSwapIndex] = 0;
 
-                        currFrameData[0].listofbufferchanges.push_back({ 1,(int)*gravityIterator * (int)sizeof(glm::vec3),sizeof(glm::vec3) });
-                        currFrameData[0].bufferlocations.push_back(*gravityIterator);
-                        
-                        currFrameData[0].listofbufferchanges.push_back({ 1,(int)finalSwapIndex * (int)sizeof(glm::vec3),sizeof(glm::vec3) });
-                        currFrameData[0].bufferlocations.push_back(finalSwapIndex);
+                        currFrameData[0].listofbufferchanges.push_back({ 1,(int)*gravityIterator * (int)sizeof(glm::vec3),sizeof(glm::vec3), *gravityIterator });                        
+                        currFrameData[0].listofbufferchanges.push_back({ 1,(int)finalSwapIndex * (int)sizeof(glm::vec3),sizeof(glm::vec3), finalSwapIndex });
 
                         currFrameExplodeOffsets[explodeIndex] = currFrameObjectOffsets[finalSwapIndex];
                         currFrameExplodeTimes[explodeIndex] = currentFrame;
 
-                        currFrameData[1].listofbufferchanges.push_back({ 1,(int)explodeIndex * (int)sizeof(glm::vec3),sizeof(glm::vec3) });
-                        currFrameData[1].bufferlocations.push_back(explodeIndex);
-                        
-                        currFrameData[1].listofbufferchanges.push_back({ 2,(int)explodeIndex * (int)sizeof(float),sizeof(float) });
-                        currFrameData[1].bufferlocations.push_back(explodeIndex);
+                        currFrameData[1].listofbufferchanges.push_back({ 1,(int)explodeIndex * (int)sizeof(glm::vec3),sizeof(glm::vec3), explodeIndex });                        
+                        currFrameData[1].listofbufferchanges.push_back({ 2,(int)explodeIndex * (int)sizeof(float),sizeof(float), explodeIndex });
                         
                         ++explodeIndex;
 
@@ -646,10 +563,8 @@ int main()
 
                 if (explodeIndex)
                 {
-                    currFrameData[1].listofbufferchanges.push_back({ 1,0,explodeIndex * (int)sizeof(glm::vec3) });
-                    currFrameData[1].bufferlocations.push_back(0);
-                    currFrameData[1].listofbufferchanges.push_back({ 2,0,explodeIndex * (int)sizeof(float) });
-                    currFrameData[1].bufferlocations.push_back(0);
+                    currFrameData[1].listofbufferchanges.push_back({ 1,0,explodeIndex * (int)sizeof(glm::vec3), 0 });
+                    currFrameData[1].listofbufferchanges.push_back({ 2,0,explodeIndex * (int)sizeof(float), 0 });
                 }
             }
 
@@ -669,6 +584,10 @@ int main()
             currFrameData[2].updateUniform("projection", projection);
             
             separateRenderer::myptr.fetch_add(1);
+
+            myen = std::chrono::high_resolution_clock::now();
+            mydur += std::chrono::duration_cast<std::chrono::milliseconds>(myen - myst);
+            ++myct;
         }
         glfwPollEvents();
     }

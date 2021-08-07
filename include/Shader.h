@@ -11,15 +11,19 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-
+#include <array> 
 class Shader
 {
 public:
     unsigned int ID;
     // constructor generates the shader on the fly
     // ------------------------------------------------------------------------
-    Shader(const char* vShaderCode, const char* fShaderCode, const char* gShaderCode = nullptr)
+    Shader(std::array<const char*, 3> shaderSource)
     {
+        const char* vShaderCode = shaderSource[0];
+        const char* fShaderCode = shaderSource[1];
+        const char* gShaderCode = shaderSource[2];
+        
         unsigned int vertex, fragment, geometry;
         
         // vertex shader
