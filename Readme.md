@@ -16,9 +16,9 @@ To build, run CMake on the source directory- preferably into a build directory.
 Open the corresponding visual studio solution and build the project. Then build the Install project. This will create a bin folder that will contain the executable. 
 
 
-Plans-
+Plans [On Hold, presently looking at the Genie Engine for Age of Empires 2] -
 1. Use a bounding volume hierarchy for object picking and collision detection [NEXT]
 2. Implement multiple reflections
 3. Allow different shapes- spheres, pyramids, cuboids etc. inheritance vs templating. Perhaps assimp based model loading?!
-4. decoupling the render thread from the calculations  [separated-render-thread branch]
+4. decoupling the render thread from the calculations  [separated-render-thread branch]-  uses helper functions that abstract away graphics 
 5. ray tracing (?)
